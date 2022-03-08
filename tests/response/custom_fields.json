@@ -1,0 +1,54 @@
+[
+   {
+      "id":"customfield_15095",
+      "name":"Test Type",
+      "custom":true,
+      "orderable":true,
+      "navigable":true,
+      "searchable":true,
+      "clauseNames":[
+         "cf[15095]",
+         "Test Type"
+      ],
+      "schema":{
+         "type":"option",
+         "custom":"com.xpandit.plugins.xray:test-type-custom-field",
+         "customId":15095
+      }
+   },
+   {
+      "id":"customfield_15183",
+      "name":"Test Case Platform",
+      "custom":true,
+      "orderable":true,
+      "navigable":true,
+      "searchable":true,
+      "clauseNames":[
+         "cf[15183]",
+         "Test Case Platform"
+      ],
+      "schema":{
+         "type":"array",
+         "items":"option",
+         "custom":"com.atlassian.jira.plugin.system.customfieldtypes:multiselect",
+         "customId":15183
+      }
+   },
+   {
+      "id":"customfield_15181",
+      "name":"Importance",
+      "custom":true,
+      "orderable":true,
+      "navigable":true,
+      "searchable":true,
+      "clauseNames":[
+         "cf[15181]",
+         "Importance"
+      ],
+      "schema":{
+         "type":"option",
+         "custom":"com.atlassian.jira.plugin.system.customfieldtypes:select",
+         "customId":15181
+      }
+   }
+]

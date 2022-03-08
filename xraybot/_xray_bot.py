@@ -36,9 +36,16 @@ class TestResultEntity:
 
 class XrayBot:
     _MULTI_PROCESS_WORKER_NUM = 30
+    _TEST_TYPE_FIELD_NAME = "Test Type"
+    _TEST_PLATFORM_FIELD_NAME = "Test Case Platform"
 
     def __init__(
-        self, jira_url: str, jira_username: str, jira_pwd: str, project_key: str
+        self,
+        jira_url: str,
+        jira_username: str,
+        jira_pwd: str,
+        project_key: str,
+        **kwargs,
     ):
         self._jira_url = jira_url
         self._jira_username = jira_username
@@ -52,13 +59,30 @@ class XrayBot:
         self._xray = Xray(
             url=self._jira_url, username=self._jira_username, password=self._jira_pwd
         )
+        self._all_custom_fields = {}
+        self._parse_kwargs(kwargs)
+
+    def _parse_kwargs(self, kwargs):
+        self._test_type = None
+        self._test_platform = None
+        v = kwargs.get("test_type")
+        if v is not None:
+            self._test_type = v
+        v = kwargs.get("test_platform")
+        if v is not None:
+            self._test_platform = v
 
     def get_xray_tests(self) -> List[TestEntity]:
         logger.info(f"Start querying all xray tests for project: {self._project_key}")
         jql = (
-            f'project = "{self._project_key}" and type="Test" and reporter= "{self._jira_username}" '
+            f'project = "{self._project_key}" and type = "Test" and reporter = "{self._jira_username}" '
             'and status != "Obsolete"'
         )
+        if self._test_type is not None:
+            jql = f'{jql} and "{self._TEST_TYPE_FIELD_NAME}" = "{self._test_type}"'
+        if self._test_platform is not None:
+            jql = f'{jql} and "{self._TEST_PLATFORM_FIELD_NAME}" = "{self._test_platform}"'
+        logger.info(f"Querying jql: {jql}")
         tests = []
         for _ in self._jira.jql(
             jql, fields=["summary", "description", "issuelinks"], limit=-1
@@ -77,6 +101,13 @@ class XrayBot:
                 test.req_key = ",".join(_req_keys)
             tests.append(test)
         return tests
+
+    def _get_custom_field_by_name(self, name: str):
+        if not self._all_custom_fields:
+            self._all_custom_fields = self._jira.get_all_custom_fields()
+        for f in self._all_custom_fields:
+            if f["name"] == name:
+                return f["id"]
 
     def _delete_test(self, test_entity: TestEntity):
         logger.info(f"Start deleting test: {test_entity.key}")
@@ -109,14 +140,26 @@ class XrayBot:
 
     def _create_test(self, test_entity: TestEntity):
         logger.info(f"Start creating test: {test_entity.summary}")
+
         fields = {
             "issuetype": {"name": "Test"},
             "project": {"key": self._project_key},
             "description": test_entity.description,
             "summary": test_entity.summary,
             "assignee": {"name": self._jira_username},
-            "customfield_15095": {"value": "Automated"},
         }
+
+        if self._test_type is not None:
+            custom_field = self._get_custom_field_by_name(self._TEST_TYPE_FIELD_NAME)
+            fields[custom_field] = {"value": self._test_type}
+
+        if self._test_platform is not None:
+            custom_field = self._get_custom_field_by_name(
+                self._TEST_PLATFORM_FIELD_NAME
+            )
+            fields[custom_field] = {"value": self._test_platform}
+            fields["summary"] = f'[{self._test_platform}] {fields["summary"]}'
+
         test_entity.key = self._jira.create_issue(fields)["key"]
         logger.info(f"Created xray test: {test_entity.key}")
         self._finalize_new_test(test_entity)
@@ -322,6 +365,8 @@ class XrayBot:
 
     def _create_automation_repo_folder(self):
         automation_repo_name = "Automation Test"
+        if self._test_platform:
+            automation_repo_name = f"{automation_repo_name} - {self._test_platform}"
         automation_obsolete_repo_name = "Obsolete"
         self._automation_folder_id = self._create_repo_folder(automation_repo_name, -1)
         self._automation_obsolete_folder_id = self._create_repo_folder(

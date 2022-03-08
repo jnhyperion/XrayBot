@@ -21,8 +21,8 @@ mock_project_key = "DEMO"
 mock_search_request = (
     f"{mock_url}/rest/api/2/search?startAt=0&maxResults=-1&"
     f"fields=summary%2Cdescription%2Cissuelinks&"
-    f"jql=project+%3D+%22{mock_project_key}%22+and+type%3D%22Test%22+"
-    f"and+reporter%3D+%22{mock_username}%22+"
+    f"jql=project+%3D+%22{mock_project_key}%22+and+type+%3D+%22Test%22+"
+    f"and+reporter+%3D+%22{mock_username}%22+"
     f"and+status+%21%3D+%22Obsolete%22"
 )
 mock_xray_tests = [
@@ -69,6 +69,48 @@ def test_get_xray_tests(requests_mock):
     assert xray_tests == mock_xray_tests
 
 
+def test_get_xray_tests_with_type(requests_mock):
+    requests_mock.get(
+        mock_search_request + "+and+%22Test+Type%22+%3D+%22Automated%22",
+        json=_get_response("search"),
+    )
+    xray_bot = XrayBot(
+        mock_url, mock_username, mock_pwd, mock_project_key, test_type="Automated"
+    )
+    xray_tests = xray_bot.get_xray_tests()
+    assert xray_tests == mock_xray_tests
+
+
+def test_get_xray_tests_with_platform(requests_mock):
+    requests_mock.get(
+        mock_search_request + "+and+%22Test+Case+Platform%22+%3D+%22Android%22",
+        json=_get_response("search"),
+    )
+    xray_bot = XrayBot(
+        mock_url, mock_username, mock_pwd, mock_project_key, test_platform="Android"
+    )
+    xray_tests = xray_bot.get_xray_tests()
+    assert xray_tests == mock_xray_tests
+
+
+def test_get_xray_tests_with_type_and_platform(requests_mock):
+    requests_mock.get(
+        mock_search_request
+        + "+and+%22Test+Type%22+%3D+%22Automated%22+and+%22Test+Case+Platform%22+%3D+%22Android%22",
+        json=_get_response("search"),
+    )
+    xray_bot = XrayBot(
+        mock_url,
+        mock_username,
+        mock_pwd,
+        mock_project_key,
+        test_type="Automated",
+        test_platform="Android",
+    )
+    xray_tests = xray_bot.get_xray_tests()
+    assert xray_tests == mock_xray_tests
+
+
 def test_get_test_diff(requests_mock):
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
     requests_mock.get(mock_search_request, json=_get_response("search"))
@@ -103,6 +145,62 @@ def test_xray_sync(mocker):
                 "description": "Foo desc",
                 "summary": "Foo",
                 "assignee": {"name": "username"},
+            }
+        ),
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Bar desc",
+                "summary": "Bar",
+                "assignee": {"name": "username"},
+            }
+        ),
+    ]
+    # set one deleted cases and finalize 2 new cases
+    assert mock_jira.set_issue_status.call_args_list == [
+        call("DEMO-9", "Obsolete"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+    ]
+    # update case
+    assert mock_jira.update_issue_field.call_args_list == [
+        call(
+            key="DEMO-11",
+            fields={"summary": "test_error", "description": "updated desc"},
+        )
+    ]
+
+
+def test_xray_sync_with_type(mocker):
+    xray_bot = XrayBot(
+        mock_url, mock_username, mock_pwd, mock_project_key, test_type="Automated"
+    )
+
+    def mock_side_effect(fun, params):
+        for param in params:
+            fun(param)
+
+    mock_process_pool_map = mocker.patch.object(_xray_bot.ProcessPoolExecutor, "map")
+    mock_process_pool_map.side_effect = mock_side_effect
+    mock_jira = mocker.patch.object(xray_bot, "_jira")
+    mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
+    mock_jira.jql.return_value = _get_response("search")
+    mocker.patch.object(xray_bot, "_xray")
+    xray_bot.sync_tests(local_tests)
+    # create 2 cases
+    assert mock_jira.create_issue.call_args_list == [
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Foo desc",
+                "summary": "Foo",
+                "assignee": {"name": "username"},
                 "customfield_15095": {"value": "Automated"},
             }
         ),
@@ -114,6 +212,129 @@ def test_xray_sync(mocker):
                 "summary": "Bar",
                 "assignee": {"name": "username"},
                 "customfield_15095": {"value": "Automated"},
+            }
+        ),
+    ]
+    # set one deleted cases and finalize 2 new cases
+    assert mock_jira.set_issue_status.call_args_list == [
+        call("DEMO-9", "Obsolete"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+    ]
+    # update case
+    assert mock_jira.update_issue_field.call_args_list == [
+        call(
+            key="DEMO-11",
+            fields={"summary": "test_error", "description": "updated desc"},
+        )
+    ]
+
+
+def test_xray_sync_with_platform(mocker):
+    xray_bot = XrayBot(
+        mock_url, mock_username, mock_pwd, mock_project_key, test_platform="Android"
+    )
+
+    def mock_side_effect(fun, params):
+        for param in params:
+            fun(param)
+
+    mock_process_pool_map = mocker.patch.object(_xray_bot.ProcessPoolExecutor, "map")
+    mock_process_pool_map.side_effect = mock_side_effect
+    mock_jira = mocker.patch.object(xray_bot, "_jira")
+    mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
+    mock_jira.jql.return_value = _get_response("search")
+    mocker.patch.object(xray_bot, "_xray")
+    xray_bot.sync_tests(local_tests)
+    # create 2 cases
+    assert mock_jira.create_issue.call_args_list == [
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Foo desc",
+                "summary": "[Android] Foo",
+                "assignee": {"name": "username"},
+                "customfield_15183": {"value": "Android"},
+            }
+        ),
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Bar desc",
+                "summary": "[Android] Bar",
+                "assignee": {"name": "username"},
+                "customfield_15183": {"value": "Android"},
+            }
+        ),
+    ]
+    # set one deleted cases and finalize 2 new cases
+    assert mock_jira.set_issue_status.call_args_list == [
+        call("DEMO-9", "Obsolete"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+    ]
+    # update case
+    assert mock_jira.update_issue_field.call_args_list == [
+        call(
+            key="DEMO-11",
+            fields={"summary": "test_error", "description": "updated desc"},
+        )
+    ]
+
+
+def test_xray_sync_with_type_and_platform(mocker):
+    xray_bot = XrayBot(
+        mock_url,
+        mock_username,
+        mock_pwd,
+        mock_project_key,
+        test_type="Automated",
+        test_platform="Android",
+    )
+
+    def mock_side_effect(fun, params):
+        for param in params:
+            fun(param)
+
+    mock_process_pool_map = mocker.patch.object(_xray_bot.ProcessPoolExecutor, "map")
+    mock_process_pool_map.side_effect = mock_side_effect
+    mock_jira = mocker.patch.object(xray_bot, "_jira")
+    mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
+    mock_jira.jql.return_value = _get_response("search")
+    mocker.patch.object(xray_bot, "_xray")
+    xray_bot.sync_tests(local_tests)
+    # create 2 cases
+    assert mock_jira.create_issue.call_args_list == [
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Foo desc",
+                "summary": "[Android] Foo",
+                "assignee": {"name": "username"},
+                "customfield_15095": {"value": "Automated"},
+                "customfield_15183": {"value": "Android"},
+            }
+        ),
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Bar desc",
+                "summary": "[Android] Bar",
+                "assignee": {"name": "username"},
+                "customfield_15095": {"value": "Automated"},
+                "customfield_15183": {"value": "Android"},
             }
         ),
     ]
