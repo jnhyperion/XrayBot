@@ -257,9 +257,9 @@ def test_xray_sync_with_platform(mocker):
                 "issuetype": {"name": "Test"},
                 "project": {"key": "DEMO"},
                 "description": "Foo desc",
-                "summary": "[Android] Foo",
+                "summary": "Foo",
                 "assignee": {"name": "username"},
-                "customfield_15183": {"value": "Android"},
+                "customfield_15183": [{"value": "Android"}],
             }
         ),
         call(
@@ -267,9 +267,9 @@ def test_xray_sync_with_platform(mocker):
                 "issuetype": {"name": "Test"},
                 "project": {"key": "DEMO"},
                 "description": "Bar desc",
-                "summary": "[Android] Bar",
+                "summary": "Bar",
                 "assignee": {"name": "username"},
-                "customfield_15183": {"value": "Android"},
+                "customfield_15183": [{"value": "Android"}],
             }
         ),
     ]
@@ -320,10 +320,10 @@ def test_xray_sync_with_type_and_platform(mocker):
                 "issuetype": {"name": "Test"},
                 "project": {"key": "DEMO"},
                 "description": "Foo desc",
-                "summary": "[Android] Foo",
+                "summary": "Foo",
                 "assignee": {"name": "username"},
                 "customfield_15095": {"value": "Automated"},
-                "customfield_15183": {"value": "Android"},
+                "customfield_15183": [{"value": "Android"}],
             }
         ),
         call(
@@ -331,10 +331,10 @@ def test_xray_sync_with_type_and_platform(mocker):
                 "issuetype": {"name": "Test"},
                 "project": {"key": "DEMO"},
                 "description": "Bar desc",
-                "summary": "[Android] Bar",
+                "summary": "Bar",
                 "assignee": {"name": "username"},
                 "customfield_15095": {"value": "Automated"},
-                "customfield_15183": {"value": "Android"},
+                "customfield_15183": [{"value": "Android"}],
             }
         ),
     ]

@@ -166,10 +166,12 @@ class XrayBot:
             custom_field = self._get_custom_field_by_name(
                 self._TEST_PLATFORM_FIELD_NAME
             )
-            fields[custom_field] = {"value": self._test_platform}
-            fields["summary"] = f'[{self._test_platform}] {fields["summary"]}'
-
-        test_entity.key = self._jira.create_issue(fields)["key"]
+            fields[custom_field] = [{"value": self._test_platform}]
+        try:
+            test_entity.key = self._jira.create_issue(fields)["key"]
+        except Exception as e:
+            logger.error(f"Create test with error: {e}")
+            raise e
         logger.info(f"Created xray test: {test_entity.key}")
         self._finalize_new_test(test_entity)
         self._link_test(test_entity)
