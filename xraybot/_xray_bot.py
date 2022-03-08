@@ -47,6 +47,15 @@ class XrayBot:
         project_key: str,
         **kwargs,
     ):
+        """
+        :param jira_url: str
+        :param jira_username: str
+        :param jira_pwd: str
+        :param project_key: str, jira project key e.g: "TEST"
+        :param kwargs: additional custom field to be field in the test ticket, for now only support:
+                       1. `test_type` -> Xray - "Test Type"
+                       2. `test_platform` -> Xray - "Test Case Platform"
+        """
         self._jira_url = jira_url
         self._jira_username = jira_username
         self._jira_pwd = jira_pwd
