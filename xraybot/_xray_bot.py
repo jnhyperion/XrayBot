@@ -1,6 +1,6 @@
 import logging
 from enum import Enum
-from typing import List, Tuple
+from typing import List, Tuple, Union, Dict
 from atlassian import Jira, Xray
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor
@@ -35,26 +35,19 @@ class TestResultEntity:
 
 
 class XrayBot:
+
     _MULTI_PROCESS_WORKER_NUM = 30
-    _TEST_TYPE_FIELD_NAME = "Test Type"
-    _TEST_PLATFORM_FIELD_NAME = "Test Case Platform"
+    _AUTOMATION_TESTS_FOLDER_NAME = "Automation Test"
+    _AUTOMATION_OBSOLETE_TESTS_FOLDER_NAME = "Obsolete"
 
     def __init__(
-        self,
-        jira_url: str,
-        jira_username: str,
-        jira_pwd: str,
-        project_key: str,
-        **kwargs,
+        self, jira_url: str, jira_username: str, jira_pwd: str, project_key: str
     ):
         """
         :param jira_url: str
         :param jira_username: str
         :param jira_pwd: str
-        :param project_key: str, jira project key e.g: "TEST"
-        :param kwargs: additional custom field to be field in the test ticket, for now only support:
-                       1. `test_type` -> Xray - "Test Type"
-                       2. `test_platform` -> Xray - "Test Case Platform"
+        :param project_key: str, jira project key, e.g: "TEST"
         """
         self._jira_url = jira_url
         self._jira_username = jira_username
@@ -68,18 +61,18 @@ class XrayBot:
         self._xray = Xray(
             url=self._jira_url, username=self._jira_username, password=self._jira_pwd
         )
-        self._all_custom_fields = {}
-        self._parse_kwargs(kwargs)
+        self._custom_fields: Dict[str, Union[str, List[str]]] = {}
+        self._cached_all_custom_fields = None
 
-    def _parse_kwargs(self, kwargs):
-        self._test_type = None
-        self._test_platform = None
-        v = kwargs.get("test_type")
-        if v is not None:
-            self._test_type = v
-        v = kwargs.get("test_platform")
-        if v is not None:
-            self._test_platform = v
+    def configure_custom_field(
+        self, field_name: str, field_value: Union[str, List[str]]
+    ):
+        """
+        :param field_name: str, custom field name
+        :param field_value: custom field value of the test ticket
+        e.g: field_value="value", field_value=["value1", "value2"]
+        """
+        self._custom_fields[field_name] = field_value
 
     def get_xray_tests(self) -> List[TestEntity]:
         logger.info(f"Start querying all xray tests for project: {self._project_key}")
@@ -87,10 +80,12 @@ class XrayBot:
             f'project = "{self._project_key}" and type = "Test" and reporter = "{self._jira_username}" '
             'and status != "Obsolete"'
         )
-        if self._test_type is not None:
-            jql = f'{jql} and "{self._TEST_TYPE_FIELD_NAME}" = "{self._test_type}"'
-        if self._test_platform is not None:
-            jql = f'{jql} and "{self._TEST_PLATFORM_FIELD_NAME}" = "{self._test_platform}"'
+        for k, v in self._custom_fields.items():
+            if isinstance(v, list) and v:
+                converted = ",".join([f'"{_}"' for _ in v])
+                jql = f'{jql} and "{k}" in ({converted})'
+            else:
+                jql = f'{jql} and "{k}" = "{v}"'
         logger.info(f"Querying jql: {jql}")
         tests = []
         for _ in self._jira.jql(
@@ -112,9 +107,9 @@ class XrayBot:
         return tests
 
     def _get_custom_field_by_name(self, name: str):
-        if not self._all_custom_fields:
-            self._all_custom_fields = self._jira.get_all_custom_fields()
-        for f in self._all_custom_fields:
+        if not self._cached_all_custom_fields:
+            self._cached_all_custom_fields = self._jira.get_all_custom_fields()
+        for f in self._cached_all_custom_fields:
             if f["name"] == name:
                 return f["id"]
 
@@ -158,15 +153,12 @@ class XrayBot:
             "assignee": {"name": self._jira_username},
         }
 
-        if self._test_type is not None:
-            custom_field = self._get_custom_field_by_name(self._TEST_TYPE_FIELD_NAME)
-            fields[custom_field] = {"value": self._test_type}
-
-        if self._test_platform is not None:
-            custom_field = self._get_custom_field_by_name(
-                self._TEST_PLATFORM_FIELD_NAME
-            )
-            fields[custom_field] = [{"value": self._test_platform}]
+        for k, v in self._custom_fields.items():
+            custom_field = self._get_custom_field_by_name(k)
+            if isinstance(v, list) and v:
+                fields[custom_field] = [{"value": _} for _ in v]
+            else:
+                fields[custom_field] = {"value": v}
         try:
             test_entity.key = self._jira.create_issue(fields)["key"]
         except Exception as e:
@@ -375,13 +367,11 @@ class XrayBot:
         return folder_id
 
     def _create_automation_repo_folder(self):
-        automation_repo_name = "Automation Test"
-        if self._test_platform:
-            automation_repo_name = f"{automation_repo_name} - {self._test_platform}"
-        automation_obsolete_repo_name = "Obsolete"
-        self._automation_folder_id = self._create_repo_folder(automation_repo_name, -1)
+        self._automation_folder_id = self._create_repo_folder(
+            self._AUTOMATION_TESTS_FOLDER_NAME, -1
+        )
         self._automation_obsolete_folder_id = self._create_repo_folder(
-            automation_obsolete_repo_name, self._automation_folder_id
+            self._AUTOMATION_OBSOLETE_TESTS_FOLDER_NAME, self._automation_folder_id
         )
 
     def upload_automation_results(

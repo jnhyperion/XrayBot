@@ -69,34 +69,32 @@ def test_get_xray_tests(requests_mock):
     assert xray_tests == mock_xray_tests
 
 
-def test_get_xray_tests_with_type(requests_mock):
+def test_get_xray_tests_with_cf_value_str(requests_mock):
     requests_mock.get(
         mock_search_request + "+and+%22Test+Type%22+%3D+%22Automated%22",
         json=_get_response("search"),
     )
-    xray_bot = XrayBot(
-        mock_url, mock_username, mock_pwd, mock_project_key, test_type="Automated"
-    )
+    xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
+    xray_bot.configure_custom_field("Test Type", "Automated")
     xray_tests = xray_bot.get_xray_tests()
     assert xray_tests == mock_xray_tests
 
 
-def test_get_xray_tests_with_platform(requests_mock):
+def test_get_xray_tests_with_cf_value_list(requests_mock):
     requests_mock.get(
-        mock_search_request + "+and+%22Test+Case+Platform%22+%3D+%22Android%22",
+        mock_search_request + "+and+%22Test+Case+Platform%22+in+%28%22Android%22%29",
         json=_get_response("search"),
     )
-    xray_bot = XrayBot(
-        mock_url, mock_username, mock_pwd, mock_project_key, test_platform="Android"
-    )
+    xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
+    xray_bot.configure_custom_field("Test Case Platform", ["Android"])
     xray_tests = xray_bot.get_xray_tests()
     assert xray_tests == mock_xray_tests
 
 
-def test_get_xray_tests_with_type_and_platform(requests_mock):
+def test_get_xray_tests_with_cf_value_str_list(requests_mock):
     requests_mock.get(
         mock_search_request
-        + "+and+%22Test+Type%22+%3D+%22Automated%22+and+%22Test+Case+Platform%22+%3D+%22Android%22",
+        + "+and+%22Test+Type%22+%3D+%22Automated%22+and+%22Test+Case+Platform%22+in+%28%22Android%22%29",
         json=_get_response("search"),
     )
     xray_bot = XrayBot(
@@ -104,9 +102,9 @@ def test_get_xray_tests_with_type_and_platform(requests_mock):
         mock_username,
         mock_pwd,
         mock_project_key,
-        test_type="Automated",
-        test_platform="Android",
     )
+    xray_bot.configure_custom_field("Test Type", "Automated")
+    xray_bot.configure_custom_field("Test Case Platform", ["Android"])
     xray_tests = xray_bot.get_xray_tests()
     assert xray_tests == mock_xray_tests
 
@@ -176,10 +174,9 @@ def test_xray_sync(mocker):
     ]
 
 
-def test_xray_sync_with_type(mocker):
-    xray_bot = XrayBot(
-        mock_url, mock_username, mock_pwd, mock_project_key, test_type="Automated"
-    )
+def test_xray_sync_with_cf_value_str(mocker):
+    xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
+    xray_bot.configure_custom_field("Test Type", "Automated")
 
     def mock_side_effect(fun, params):
         for param in params:
@@ -234,10 +231,9 @@ def test_xray_sync_with_type(mocker):
     ]
 
 
-def test_xray_sync_with_platform(mocker):
-    xray_bot = XrayBot(
-        mock_url, mock_username, mock_pwd, mock_project_key, test_platform="Android"
-    )
+def test_xray_sync_with_cf_value_list(mocker):
+    xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
+    xray_bot.configure_custom_field("Test Case Platform", ["Android"])
 
     def mock_side_effect(fun, params):
         for param in params:
@@ -292,15 +288,15 @@ def test_xray_sync_with_platform(mocker):
     ]
 
 
-def test_xray_sync_with_type_and_platform(mocker):
+def test_xray_sync_with_cf_value_str_list(mocker):
     xray_bot = XrayBot(
         mock_url,
         mock_username,
         mock_pwd,
         mock_project_key,
-        test_type="Automated",
-        test_platform="Android",
     )
+    xray_bot.configure_custom_field("Test Type", "Automated")
+    xray_bot.configure_custom_field("Test Case Platform", ["Android"])
 
     def mock_side_effect(fun, params):
         for param in params:
