@@ -18,12 +18,13 @@ mock_url = "http://test.com"
 mock_username = "username"
 mock_pwd = "pwd"
 mock_project_key = "DEMO"
+mock_get_cf_request = f"{mock_url}/rest/api/2/field"
 mock_search_request = (
     f"{mock_url}/rest/api/2/search?startAt=0&maxResults=-1&"
-    f"fields=summary%2Cdescription%2Cissuelinks&"
+    f"fields=summary%2Cdescription%2Cissuelinks%2Ccustomfield_100&"
     f"jql=project+%3D+%22{mock_project_key}%22+and+type+%3D+%22Test%22+"
     f"and+reporter+%3D+%22{mock_username}%22+"
-    f"and+status+%21%3D+%22Obsolete%22"
+    f"and+status+%21%3D+%22Obsolete%22+and+%22Test+Type%22+%3D+%22Generic%22"
 )
 mock_xray_tests = [
     TestEntity(
@@ -31,6 +32,7 @@ mock_xray_tests = [
         req_key="REQ-120",
         summary="test_error",
         description="tests the multi error",
+        unique_identifier="tests/my-directory/test_demo.py::test_error",
     ),
     TestEntity(
         key="DEMO-10",
@@ -38,6 +40,7 @@ mock_xray_tests = [
         summary="test_invalid_email_format",
         description="Summary: Check the invalid email format\nExpectation: the warning is same as the design\n"
         "1. input a invalid email format\n2. click the login button",
+        unique_identifier="tests/my-directory/test_demo.py::test_invalid_email_format",
     ),
     TestEntity(
         key="DEMO-9",
@@ -46,11 +49,22 @@ mock_xray_tests = [
         description="Summary: Use the invalid account to login the app\n"
         "Expectation: the warning is same as the design\n1. input a invalid account and password\n"
         "2. click the login button",
+        unique_identifier="tests/my-directory/test_demo.py::test_login_app_invalid_account",
     ),
 ]
 cpy_mock_xray_tests = deepcopy(mock_xray_tests)
-to_be_appended1 = TestEntity(summary="Foo", description="Foo desc", req_key="REQ-100")
-to_be_appended2 = TestEntity(summary="Bar", description="Bar desc", req_key="REQ-101")
+to_be_appended1 = TestEntity(
+    summary="Foo",
+    description="Foo desc",
+    req_key="REQ-100",
+    unique_identifier="tests/my-directory/test_demo.py::Foo",
+)
+to_be_appended2 = TestEntity(
+    summary="Bar",
+    description="Bar desc",
+    req_key="REQ-101",
+    unique_identifier="tests/my-directory/test_demo.py::Bar",
+)
 to_be_updated = cpy_mock_xray_tests[0]
 to_be_updated.description = "updated desc"
 to_be_deleted = cpy_mock_xray_tests[2]
@@ -62,6 +76,12 @@ def _get_response(name) -> dict:
         return json.load(f)
 
 
+@pytest.fixture(autouse=True)
+def setup(requests_mock):
+    requests_mock.get(mock_get_cf_request, json=_get_response("custom_fields"))
+    yield
+
+
 def test_get_xray_tests(requests_mock):
     requests_mock.get(mock_search_request, json=_get_response("search"))
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
@@ -71,11 +91,11 @@ def test_get_xray_tests(requests_mock):
 
 def test_get_xray_tests_with_cf_value_str(requests_mock):
     requests_mock.get(
-        mock_search_request + "+and+%22Test+Type%22+%3D+%22Automated%22",
+        mock_search_request + "+and+%22Test+Scope%22+%3D+%22BAT%22",
         json=_get_response("search"),
     )
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
-    xray_bot.configure_custom_field("Test Type", "Automated")
+    xray_bot.configure_custom_field("Test Scope", "BAT")
     xray_tests = xray_bot.get_xray_tests()
     assert xray_tests == mock_xray_tests
 
@@ -93,8 +113,8 @@ def test_get_xray_tests_with_cf_value_list(requests_mock):
 
 def test_get_xray_tests_with_cf_value_str_list(requests_mock):
     requests_mock.get(
-        mock_search_request
-        + "+and+%22Test+Type%22+%3D+%22Automated%22+and+%22Test+Case+Platform%22+in+%28%22Android%22%29",
+        mock_search_request.replace("Generic", "Automated")
+        + "+and+%22Test+Case+Platform%22+in+%28%22Android%22%29",
         json=_get_response("search"),
     )
     xray_bot = XrayBot(
@@ -132,6 +152,7 @@ def test_xray_sync(mocker):
     mock_process_pool_map.side_effect = mock_side_effect
     mock_jira = mocker.patch.object(xray_bot, "_jira")
     mock_jira.jql.return_value = _get_response("search")
+    mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
     mocker.patch.object(xray_bot, "_xray")
     xray_bot.sync_tests(local_tests)
     # create 2 cases
@@ -143,6 +164,8 @@ def test_xray_sync(mocker):
                 "description": "Foo desc",
                 "summary": "Foo",
                 "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Foo",
+                "customfield_15095": {"value": "Generic"},
             }
         ),
         call(
@@ -152,6 +175,8 @@ def test_xray_sync(mocker):
                 "description": "Bar desc",
                 "summary": "Bar",
                 "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Bar",
+                "customfield_15095": {"value": "Generic"},
             }
         ),
     ]
@@ -198,6 +223,7 @@ def test_xray_sync_with_cf_value_str(mocker):
                 "description": "Foo desc",
                 "summary": "Foo",
                 "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Foo",
                 "customfield_15095": {"value": "Automated"},
             }
         ),
@@ -208,6 +234,7 @@ def test_xray_sync_with_cf_value_str(mocker):
                 "description": "Bar desc",
                 "summary": "Bar",
                 "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Bar",
                 "customfield_15095": {"value": "Automated"},
             }
         ),
@@ -255,6 +282,8 @@ def test_xray_sync_with_cf_value_list(mocker):
                 "description": "Foo desc",
                 "summary": "Foo",
                 "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Foo",
+                "customfield_15095": {"value": "Generic"},
                 "customfield_15183": [{"value": "Android"}],
             }
         ),
@@ -265,6 +294,8 @@ def test_xray_sync_with_cf_value_list(mocker):
                 "description": "Bar desc",
                 "summary": "Bar",
                 "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Bar",
+                "customfield_15095": {"value": "Generic"},
                 "customfield_15183": [{"value": "Android"}],
             }
         ),
@@ -318,6 +349,7 @@ def test_xray_sync_with_cf_value_str_list(mocker):
                 "description": "Foo desc",
                 "summary": "Foo",
                 "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Foo",
                 "customfield_15095": {"value": "Automated"},
                 "customfield_15183": [{"value": "Android"}],
             }
@@ -329,6 +361,7 @@ def test_xray_sync_with_cf_value_str_list(mocker):
                 "description": "Bar desc",
                 "summary": "Bar",
                 "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Bar",
                 "customfield_15095": {"value": "Automated"},
                 "customfield_15183": [{"value": "Android"}],
             }
@@ -377,6 +410,7 @@ def test_upload_results(mocker):
     mock_jira = mocker.patch.object(xray_bot, "_jira")
     mock_jira.create_issue.side_effect = create_issue_side_effect
     mock_jira.jql.return_value = _get_response("search")
+    mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
     mock_xray = mocker.patch.object(xray_bot, "_xray")
     mock_xray.get_test_runs.return_value = [
         {"testExecKey": test_exec_id, "id": test_run_id}

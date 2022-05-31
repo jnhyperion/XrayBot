@@ -1,6 +1,6 @@
 import logging
 from enum import Enum
-from typing import List, Tuple, Union, Dict
+from typing import List, Tuple, Union, Dict, Optional
 from atlassian import Jira, Xray
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor
@@ -16,10 +16,13 @@ logger.basicConfig(**logger_kwargs)
 
 @dataclass
 class TestEntity:
-    key: str = None
-    req_key: str = None
-    summary: str = None
-    description: str = None
+    # store in test custom field "Generic Test Definition"
+    # using as the unique identified for one certain test
+    unique_identifier: str
+    summary: str
+    description: str
+    req_key: str
+    key: Optional[str] = None
 
 
 class XrayResultType(Enum):
@@ -32,6 +35,13 @@ class XrayResultType(Enum):
 class TestResultEntity:
     key: str
     result: XrayResultType
+
+
+_CF_TEST_DEFINITION = "Generic Test Definition"
+_CF_TEST_TYPE = "Test Type"
+_CF_TEST_TYPE_VAL_GENERIC = "Generic"
+_CF_TEST_TYPE_VAL_MANUAL = "Manual"
+_CF_TEST_TYPE_VAL_CUCUMBER = "Cucumber"
 
 
 class XrayBot:
@@ -63,6 +73,7 @@ class XrayBot:
         )
         self._custom_fields: Dict[str, Union[str, List[str]]] = {}
         self._cached_all_custom_fields = None
+        self.configure_custom_field(_CF_TEST_TYPE, _CF_TEST_TYPE_VAL_GENERIC)
 
     def configure_custom_field(
         self, field_name: str, field_value: Union[str, List[str]]
@@ -72,7 +83,19 @@ class XrayBot:
         :param field_value: custom field value of the test ticket
         e.g: field_value="value", field_value=["value1", "value2"]
         """
+        if field_name == _CF_TEST_TYPE:
+            assert field_value not in (
+                _CF_TEST_TYPE_VAL_MANUAL,
+                _CF_TEST_TYPE_VAL_CUCUMBER,
+            ), f'Custom field value "{field_value}" is not supported in "{field_name}".'
+        assert (
+            field_name != _CF_TEST_DEFINITION
+        ), f'Custom field "{field_name}" is not configurable.'
         self._custom_fields[field_name] = field_value
+
+    @property
+    def cf_id_test_definition(self):
+        return self._get_custom_field_by_name(_CF_TEST_DEFINITION)
 
     def get_xray_tests(self) -> List[TestEntity]:
         logger.info(f"Start querying all xray tests for project: {self._project_key}")
@@ -89,12 +112,16 @@ class XrayBot:
         logger.info(f"Querying jql: {jql}")
         tests = []
         for _ in self._jira.jql(
-            jql, fields=["summary", "description", "issuelinks"], limit=-1
+            jql,
+            fields=["summary", "description", "issuelinks", self.cf_id_test_definition],
+            limit=-1,
         )["issues"]:
             test = TestEntity(
-                key=_["key"],
+                unique_identifier=_["fields"][self.cf_id_test_definition],
                 summary=_["fields"]["summary"],
                 description=_["fields"]["description"],
+                req_key="",
+                key=_["key"],
             )
             links = _["fields"]["issuelinks"]
             _req_keys = []
@@ -151,6 +178,7 @@ class XrayBot:
             "description": test_entity.description,
             "summary": test_entity.summary,
             "assignee": {"name": self._jira_username},
+            self.cf_id_test_definition: test_entity.unique_identifier,
         }
 
         for k, v in self._custom_fields.items():
@@ -190,6 +218,9 @@ class XrayBot:
                 self._jira.create_issue_link(link_param)
 
     def sync_tests(self, local_tests: List[TestEntity]):
+        assert len(local_tests) == len(
+            set([_.unique_identifier for _ in local_tests])
+        ), "Duplicated unique_identifier found in local_tests"
         self._create_automation_repo_folder()
         xray_tests = self.get_xray_tests()
         to_be_deleted, to_be_appended, to_be_updated = self._get_tests_diff(
@@ -214,32 +245,36 @@ class XrayBot:
         to_be_updated = list()
 
         for test in xray_tests:
-            if test.summary not in [_.summary for _ in local_tests]:
+            if test.unique_identifier not in [_.unique_identifier for _ in local_tests]:
                 # xray test not valid in xml anymore
                 to_be_deleted.append(test)
 
         for test in local_tests:
-            if test.summary not in [_.summary for _ in xray_tests]:
+            if test.unique_identifier not in [_.unique_identifier for _ in xray_tests]:
                 # local test not exist in xray
                 to_be_appended.append(test)
 
         for test in xray_tests:
-            if test.summary in [_.summary for _ in local_tests]:
+            if test.unique_identifier in [_.unique_identifier for _ in local_tests]:
                 # xray test already exists
-                previous_description = (
-                    test.description if test.description is not None else ""
-                )
-                previous_req_key = test.req_key if test.req_key is not None else ""
-                new_description = [
-                    _.description for _ in local_tests if test.summary == _.summary
+                previous_summary = test.summary
+                previous_description = test.description
+                previous_req_key = test.req_key
+                matched_local_test: TestEntity = [
+                    _
+                    for _ in local_tests
+                    if test.unique_identifier == _.unique_identifier
                 ][0]
-                new_req_key = [
-                    _.req_key for _ in local_tests if test.summary == _.summary
-                ][0]
-                if previous_description != new_description or set(
-                    previous_req_key.split(",")
-                ) != set(new_req_key.split(",")):
+                new_summary = matched_local_test.summary
+                new_description = matched_local_test.description
+                new_req_key = matched_local_test.req_key
+                if (
+                    previous_summary != new_summary
+                    or previous_description != new_description
+                    or set(previous_req_key.split(",")) != set(new_req_key.split(","))
+                ):
                     # test desc / requirement id is different
+                    test.summary = new_summary
                     test.description = new_description
                     test.req_key = new_req_key
                     to_be_updated.append(test)

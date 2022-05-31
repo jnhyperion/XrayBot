@@ -50,5 +50,22 @@
          "custom":"com.atlassian.jira.plugin.system.customfieldtypes:select",
          "customId":15181
       }
+   },
+   {
+      "id":"customfield_100",
+      "name":"Generic Test Definition",
+      "custom":true,
+      "orderable":true,
+      "navigable":true,
+      "searchable":true,
+      "clauseNames":[
+         "cf[100]",
+         "Generic Test Definition"
+      ],
+      "schema":{
+         "type":"option",
+         "custom":"com.xpandit.plugins.xray:test-type-custom-field",
+         "customId":100
+      }
    }
 ]

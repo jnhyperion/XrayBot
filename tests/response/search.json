@@ -55,7 +55,8 @@
                      }
                   }
                }
-            ]
+            ],
+            "customfield_100": "tests/my-directory/test_demo.py::test_error"
          }
       },
       {
@@ -109,7 +110,8 @@
                      }
                   }
                }
-            ]
+            ],
+            "customfield_100": "tests/my-directory/test_demo.py::test_invalid_email_format"
          }
       },
       {
@@ -163,7 +165,8 @@
                      }
                   }
                }
-            ]
+            ],
+            "customfield_100": "tests/my-directory/test_demo.py::test_login_app_invalid_account"
          }
       }
    ]
