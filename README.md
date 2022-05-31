@@ -11,7 +11,6 @@ $ pip install xray-bot
 Example
 -------
 ``` python
-
 from xraybot import XrayBot, TestEntity, TestResultEntity, XrayResultType
 
 xray_bot = XrayBot("http://jira_server", "username", "pwd", "project_key")
@@ -19,8 +18,18 @@ xray_bot = XrayBot("http://jira_server", "username", "pwd", "project_key")
 xray_tests = xray_bot.get_xray_tests()
 
 local_tests = [
-    TestEntity(summary="foo", description="desc", req_key="REQ-100"),
-    TestEntity(summary="Bar", description="desc", req_key="REQ-101"),
+    TestEntity(
+        unique_identifier="com.foo.bar.TestClass#testFoo",
+        summary="foo",
+        description="desc",
+        req_key="REQ-100",
+    ),
+    TestEntity(
+        unique_identifier="com.foo.bar.TestClass#testBar",
+        summary="Bar",
+        description="desc",
+        req_key="REQ-101",
+    ),
 ]
 xray_bot.sync_tests(local_tests)
 
