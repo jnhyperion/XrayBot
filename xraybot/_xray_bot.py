@@ -97,18 +97,19 @@ class XrayBot:
     def cf_id_test_definition(self):
         return self._get_custom_field_by_name(_CF_TEST_DEFINITION)
 
-    def get_xray_tests(self) -> List[TestEntity]:
+    def get_xray_tests(self, filter_by_cf: bool = True) -> List[TestEntity]:
         logger.info(f"Start querying all xray tests for project: {self._project_key}")
         jql = (
             f'project = "{self._project_key}" and type = "Test" and reporter = "{self._jira_username}" '
             'and status != "Obsolete"'
         )
-        for k, v in self._custom_fields.items():
-            if isinstance(v, list) and v:
-                converted = ",".join([f'"{_}"' for _ in v])
-                jql = f'{jql} and "{k}" in ({converted})'
-            else:
-                jql = f'{jql} and "{k}" = "{v}"'
+        if filter_by_cf:
+            for k, v in self._custom_fields.items():
+                if isinstance(v, list) and v:
+                    converted = ",".join([f'"{_}"' for _ in v])
+                    jql = f'{jql} and "{k}" in ({converted})'
+                else:
+                    jql = f'{jql} and "{k}" = "{v}"'
         logger.info(f"Querying jql: {jql}")
         tests = []
         for _ in self._jira.jql(
@@ -157,14 +158,23 @@ class XrayBot:
             if link["type"]["name"] == "Tests":
                 self._jira.remove_issue_link(link["id"])
 
-    def _update_jira_test(self, test_entity: TestEntity):
+    def update_jira_test(self, test_entity: TestEntity, update_cf: bool = False):
         logger.info(f"Start updating test: {test_entity.key}")
+        assert test_entity.key is not None, "Jira test key cannot be None"
+        fields = {
+            "summary": test_entity.summary,
+            "description": test_entity.description,
+        }
+        if update_cf:
+            for k, v in self._custom_fields.items():
+                custom_field = self._get_custom_field_by_name(k)
+                if isinstance(v, list) and v:
+                    fields[custom_field] = [{"value": _} for _ in v]
+                else:
+                    fields[custom_field] = {"value": v}
         self._jira.update_issue_field(
             key=test_entity.key,
-            fields={
-                "summary": test_entity.summary,
-                "description": test_entity.description,
-            },
+            fields=fields,
         )
         self._remove_links(test_entity)
         self._link_test(test_entity)
@@ -233,7 +243,7 @@ class XrayBot:
             executor.map(self._create_test, to_be_appended)
 
         with ProcessPoolExecutor(self._MULTI_PROCESS_WORKER_NUM) as executor:
-            executor.map(self._update_jira_test, to_be_updated)
+            executor.map(self.update_jira_test, to_be_updated)
 
     @staticmethod
     def _get_tests_diff(
