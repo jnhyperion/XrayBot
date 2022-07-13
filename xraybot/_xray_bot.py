@@ -46,6 +46,7 @@ _CF_TEST_TYPE_VAL_CUCUMBER = "Cucumber"
 
 class XrayBot:
 
+    _QUERY_PAGE_LIMIT = 100
     _MULTI_PROCESS_WORKER_NUM = 30
     _AUTOMATION_TESTS_FOLDER_NAME = "Automation Test"
     _AUTOMATION_OBSOLETE_TESTS_FOLDER_NAME = "Obsolete"
@@ -117,10 +118,12 @@ class XrayBot:
             fields=["summary", "description", "issuelinks", self.cf_id_test_definition],
             limit=-1,
         )["issues"]:
+            desc = _["fields"]["description"]
+            desc = desc if desc is not None else ""
             test = TestEntity(
                 unique_identifier=_["fields"][self.cf_id_test_definition],
                 summary=_["fields"]["summary"],
-                description=_["fields"]["description"],
+                description=desc,
                 req_key="",
                 key=_["key"],
             )
@@ -336,6 +339,31 @@ class XrayBot:
             test_plan_key, add=[test_execution_key]
         )
 
+    def _clean_test_plan_and_execution(
+        self, test_execution_key: str, test_plan_key: str
+    ):
+        logger.info(
+            f"Start cleaning test execution {test_execution_key} and test plan {test_plan_key}"
+        )
+        test_execution_tests = self._get_tests_from_test_execution(test_execution_key)
+        test_plan_tests = self._get_tests_from_test_plan(test_plan_key)
+
+        with ProcessPoolExecutor(self._MULTI_PROCESS_WORKER_NUM) as executor:
+            # delete obsolete tests from test execution
+            executor.map(
+                self._delete_obsolete_test_from_test_execution,
+                [test_execution_key for _ in range(len(test_execution_tests))],
+                test_execution_tests,
+            )
+
+        with ProcessPoolExecutor(self._MULTI_PROCESS_WORKER_NUM) as executor:
+            # delete obsolete tests from test plan
+            executor.map(
+                self._delete_obsolete_test_from_test_plan,
+                [test_plan_key for _ in range(len(test_plan_tests))],
+                test_plan_tests,
+            )
+
     def _create_test_execution(self, test_execution_name: str) -> str:
         jql = f'project = "{self._project_key}" and type="Test Execution" and reporter= "{self._jira_username}"'
 
@@ -377,6 +405,52 @@ class XrayBot:
             f"{self._project_key}/folders/{folder_id}/tests",
             data={"remove": [test_entity.key]},
         )
+
+    def _get_tests_from_test_plan(self, test_plan_key) -> List[str]:
+        page = 1
+        tests = []
+        while True:
+            results = self._xray.get_tests_with_test_plan(
+                test_plan_key, limit=self._QUERY_PAGE_LIMIT, page=page
+            )
+            results = [result["key"] for result in results]
+            tests = tests + results
+            if len(results) == 0:
+                break
+            else:
+                page = page + 1
+        return tests
+
+    def _get_tests_from_test_execution(self, test_execution_key) -> List[str]:
+        page = 1
+        tests = []
+        while True:
+            results = self._xray.get_tests_with_test_execution(
+                test_execution_key, limit=self._QUERY_PAGE_LIMIT, page=page
+            )
+            results = [result["key"] for result in results]
+            tests = tests + results
+            if len(results) == 0:
+                break
+            else:
+                page = page + 1
+        return tests
+
+    def _delete_obsolete_test_from_test_plan(self, test_plan_key, test_key):
+        status = self._jira.get_issue_status(test_key)
+        if status != "Finalized":
+            logger.info(
+                f"Start deleting obsolete test {test_key} from test plan {test_plan_key}"
+            )
+            self._xray.delete_test_from_test_plan(test_plan_key, test_key)
+
+    def _delete_obsolete_test_from_test_execution(self, test_execution_key, test_key):
+        status = self._jira.get_issue_status(test_key)
+        if status != "Finalized":
+            logger.info(
+                f"Start deleting obsolete test {test_key} from test execution {test_execution_key}"
+            )
+            self._xray.delete_test_from_test_execution(test_execution_key, test_key)
 
     def _create_repo_folder(self, folder_name: str, parent_id: int) -> int:
         all_folders = self._xray.get(
@@ -424,6 +498,7 @@ class XrayBot:
         test_plan_name: str,
         test_execution_name: str,
         test_results: List[TestResultEntity],
+        clean_test_plan_and_execution: bool = False,
     ):
         test_plan_key = self._create_test_plan(test_plan_name)
         test_execution_key = self._create_test_execution(test_execution_name)
@@ -445,7 +520,8 @@ class XrayBot:
             )
 
         self._add_test_execution_to_test_plan(test_execution_key, test_plan_key)
-
+        if clean_test_plan_and_execution:
+            self._clean_test_plan_and_execution(test_execution_key, test_plan_key)
         with ProcessPoolExecutor(self._MULTI_PROCESS_WORKER_NUM) as executor:
             # update test execution result
             executor.map(

@@ -89,6 +89,21 @@ def test_get_xray_tests(requests_mock):
     assert xray_tests == mock_xray_tests
 
 
+def test_get_xray_tests_with_empty_descirption(requests_mock):
+    requests_mock.get(mock_search_request, json=_get_response("search_desc_null"))
+    xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
+    xray_tests = xray_bot.get_xray_tests()
+    assert xray_tests == [
+        TestEntity(
+            key="DEMO-11",
+            req_key="REQ-120",
+            summary="test_error",
+            description="",
+            unique_identifier="tests/my-directory/test_demo.py::test_error",
+        )
+    ]
+
+
 def test_get_xray_tests_with_cf_value_str(requests_mock):
     requests_mock.get(
         mock_search_request + "+and+%22Test+Scope%22+%3D+%22BAT%22",

@@ -44,26 +44,21 @@ def clean(ctx):
 
 
 @task(clean)
-def build(ctx, skip_uninstall=False):
+def build(ctx):
     ctx.run(f"{sys.executable} setup.py bdist_wheel", hide="out")
-    dist = _get_ctx_abs_path(ctx, "dist")
-    wheel_file = os.path.join(dist, os.listdir(dist)[0])
-    assert wheel_file.endswith(".whl")
-    ctx.run(f"pip install {wheel_file}", hide="out")
-    if not skip_uninstall:
-        uninstall(ctx)
-
-
-@task(clean)
-def install(ctx):
-    uninstall(ctx)
-    build(ctx, skip_uninstall=True)
-    clean(ctx)
 
 
 @task
 def uninstall(ctx):
-    ctx.run(f"pip uninstall xray-bot -y", hide="out")
+    ctx.run(f"{sys.executable} -m pip uninstall xray-bot -y", hide="out")
+
+
+@task(build, uninstall)
+def install(ctx):
+    dist = _get_ctx_abs_path(ctx, "dist")
+    wheel_file = os.path.join(dist, os.listdir(dist)[0])
+    assert wheel_file.endswith(".whl")
+    ctx.run(f"{sys.executable} -m pip install {wheel_file}", hide="out")
 
 
 @task
