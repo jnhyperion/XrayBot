@@ -213,9 +213,12 @@ class XrayBot:
     def _finalize_new_test(self, test_entity: TestEntity):
         # only for new created xray test
         logger.info(f"Start finalizing test: {test_entity.key}")
-        self._jira.set_issue_status(test_entity.key, "Ready for Review")
-        self._jira.set_issue_status(test_entity.key, "In Review")
-        self._jira.set_issue_status(test_entity.key, "Finalized")
+        try:
+            self._jira.set_issue_status(test_entity.key, "Ready for Review")
+            self._jira.set_issue_status(test_entity.key, "In Review")
+            self._jira.set_issue_status(test_entity.key, "Finalized")
+        except Exception as e:
+            logger.warning(f"Finalize test with error: {e}")
 
     def _link_test(self, test_entity: TestEntity):
         if test_entity.req_key:
@@ -228,7 +231,10 @@ class XrayBot:
                     "inwardIssue": {"key": test_entity.key},
                     "outwardIssue": {"key": _req_key},
                 }
-                self._jira.create_issue_link(link_param)
+                try:
+                    self._jira.create_issue_link(link_param)
+                except Exception as e:
+                    logger.warning(f"Link test with error: {e}")
 
     def sync_tests(self, local_tests: List[TestEntity]):
         assert len(local_tests) == len(
@@ -393,11 +399,14 @@ class XrayBot:
                 self._xray.update_test_run_status(test_run["id"], result)
 
     def _add_case_into_folder(self, test_entity: TestEntity, folder_id: int):
-        self._xray.put(
-            f"rest/raven/1.0/api/testrepository/"
-            f"{self._project_key}/folders/{folder_id}/tests",
-            data={"add": [test_entity.key]},
-        )
+        try:
+            self._xray.put(
+                f"rest/raven/1.0/api/testrepository/"
+                f"{self._project_key}/folders/{folder_id}/tests",
+                data={"add": [test_entity.key]},
+            )
+        except Exception as e:
+            logger.warning(f"Move test to repo folder with error: {e}")
 
     def _remove_case_from_folder(self, test_entity: TestEntity, folder_id: int):
         self._xray.put(
