@@ -102,7 +102,8 @@ class XrayBot:
         logger.info(f"Start querying all xray tests for project: {self._project_key}")
         jql = (
             f'project = "{self._project_key}" and type = "Test" and reporter = "{self._jira_username}" '
-            'and status != "Obsolete"'
+            f'and status != "Obsolete" and issue in testRepositoryFolderTests("{self._project_key}", '
+            f'"{self._AUTOMATION_TESTS_FOLDER_NAME}")'
         )
         if filter_by_cf:
             for k, v in self._custom_fields.items():

@@ -24,7 +24,8 @@ mock_search_request = (
     f"fields=summary%2Cdescription%2Cissuelinks%2Ccustomfield_100&"
     f"jql=project+%3D+%22{mock_project_key}%22+and+type+%3D+%22Test%22+"
     f"and+reporter+%3D+%22{mock_username}%22+"
-    f"and+status+%21%3D+%22Obsolete%22+and+%22Test+Type%22+%3D+%22Generic%22"
+    f"and+status+%21%3D+%22Obsolete%22+and+issue+in+testRepositoryFolderTests%28%22{mock_project_key}%22%2C+"
+    f"%22Automation+Test%22%29+and+%22Test+Type%22+%3D+%22Generic%22"
 )
 mock_xray_tests = [
     TestEntity(
@@ -89,7 +90,7 @@ def test_get_xray_tests(requests_mock):
     assert xray_tests == mock_xray_tests
 
 
-def test_get_xray_tests_with_empty_descirption(requests_mock):
+def test_get_xray_tests_with_empty_description(requests_mock):
     requests_mock.get(mock_search_request, json=_get_response("search_desc_null"))
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
     xray_tests = xray_bot.get_xray_tests()
