@@ -75,6 +75,7 @@ class XrayBot:
         self._custom_fields: Dict[str, Union[str, List[str]]] = {}
         self._cached_all_custom_fields = None
         self.configure_custom_field(_CF_TEST_TYPE, _CF_TEST_TYPE_VAL_GENERIC)
+        self._labels: List[str] = []
 
     def configure_custom_field(
         self, field_name: str, field_value: Union[str, List[str]]
@@ -94,6 +95,9 @@ class XrayBot:
         ), f'Custom field "{field_name}" is not configurable.'
         self._custom_fields[field_name] = field_value
 
+    def configure_labels(self, labels: List[str]):
+        self._labels = labels
+
     @property
     def cf_id_test_definition(self):
         return self._get_custom_field_by_name(_CF_TEST_DEFINITION)
@@ -112,6 +116,11 @@ class XrayBot:
                     jql = f'{jql} and "{k}" in ({converted})'
                 else:
                     jql = f'{jql} and "{k}" = "{v}"'
+
+        if self._labels:
+            _labels_filter = ",".join([f'"{_}"' for _ in self._labels])
+            jql = f"{jql} and labels in ({_labels_filter})"
+
         logger.info(f"Querying jql: {jql}")
         tests = []
         for _ in self._jira.jql(
@@ -201,6 +210,10 @@ class XrayBot:
                 fields[custom_field] = [{"value": _} for _ in v]
             else:
                 fields[custom_field] = {"value": v}
+
+        if self._labels:
+            fields["labels"] = self._labels
+
         try:
             test_entity.key = self._jira.create_issue(fields)["key"]
         except Exception as e:
