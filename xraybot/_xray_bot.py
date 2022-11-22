@@ -239,7 +239,9 @@ class XrayBot:
             # support multi req keys
             req_key_list = test_entity.req_key.split(",")
             for _req_key in req_key_list:
-                logger.info(f"Start linking test to requirement: {test_entity.key}")
+                logger.info(
+                    f"Start linking test {test_entity.key} to requirement: {_req_key}"
+                )
                 link_param = {
                     "type": {"name": "Tests"},
                     "inwardIssue": {"key": test_entity.key},
