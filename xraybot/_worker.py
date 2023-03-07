@@ -408,7 +408,9 @@ class XrayBotWorkerMgr:
             ret = worker_func(*iterables)
             return ret
         except Exception as e:
-            logger.info(f"Worker [{worker_func.__name__}] raised error: {e}")
+            logger.info(
+                f"Worker [{worker_func.__qualname__.split('.')[0].lstrip('_')}] raised error: {e}"
+            )
             raise e
 
     def start_worker(self, worker_type: WorkerType, *iterables):
