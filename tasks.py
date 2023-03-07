@@ -78,7 +78,9 @@ def test(ctx):
 
 @task
 def lint(ctx):
-    ctx.run(f"pylint ./{pkg_folder_name} --disable=R,C,W1514,W0703,W0212,W0123,W1203")
+    ctx.run(
+        f"pylint ./{pkg_folder_name} --disable=R,C,W1514,W0703,W0212,W0123,W1203,W0221"
+    )
 
 
 @task(build)

@@ -3,7 +3,7 @@ import json
 import pytest
 from copy import deepcopy
 from unittest.mock import call, ANY
-from xraybot import XrayBot, TestEntity, TestResultEntity, XrayResultType, _xray_bot
+from xraybot import XrayBot, TestEntity, TestResultEntity, XrayResultType
 
 tests_dir = os.path.abspath(os.path.dirname(__file__))
 root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -66,10 +66,15 @@ to_be_appended2 = TestEntity(
     req_key="REQ-101",
     unique_identifier="tests/my-directory/test_demo.py::Bar",
 )
+
 to_be_updated = cpy_mock_xray_tests[0]
 to_be_updated.description = "updated desc"
 to_be_deleted = cpy_mock_xray_tests[2]
-local_tests = [to_be_appended1, to_be_appended2, to_be_updated, cpy_mock_xray_tests[1]]
+local_test2 = deepcopy(to_be_updated)
+local_test2.key = None
+local_test3 = deepcopy(cpy_mock_xray_tests[1])
+local_test3.key = None
+local_tests = [to_be_appended1, to_be_appended2, local_test2, local_test3]
 
 
 def _get_response(name) -> dict:
@@ -79,6 +84,10 @@ def _get_response(name) -> dict:
 
 @pytest.fixture(autouse=True)
 def setup(requests_mock):
+    to_be_appended1.key = None
+    to_be_appended2.key = None
+    local_test2.key = None
+    local_test3.key = None
     requests_mock.get(mock_get_cf_request, json=_get_response("custom_fields"))
     yield
 
@@ -149,9 +158,11 @@ def test_get_test_diff(requests_mock):
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
     requests_mock.get(mock_search_request, json=_get_response("search"))
     xray_tests = xray_bot.get_xray_tests()
-    _to_be_deleted, _to_be_appended, _to_be_updated = xray_bot._get_tests_diff(
-        xray_tests, local_tests
-    )
+    (
+        _to_be_deleted,
+        _to_be_appended,
+        _to_be_updated,
+    ) = xray_bot._get_non_marked_tests_diff(xray_tests, local_tests)
     assert _to_be_deleted == [to_be_deleted]
     assert _to_be_appended == [to_be_appended1, to_be_appended2]
     assert _to_be_updated == [to_be_updated]
@@ -160,16 +171,27 @@ def test_get_test_diff(requests_mock):
 def test_xray_sync(mocker):
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
 
-    def mock_side_effect(fun, params):
-        for param in params:
-            fun(param)
+    def mock_side_effect(_, func_list, *iterables):
+        for idx, func in enumerate(func_list):
+            func(*list(zip(*iterables))[idx])
 
-    mock_process_pool_map = mocker.patch.object(_xray_bot.ProcessPoolExecutor, "map")
-    mock_process_pool_map.side_effect = mock_side_effect
-    mock_jira = mocker.patch.object(xray_bot, "_jira")
-    mock_jira.jql.return_value = _get_response("search")
+    jql_side_effect_counter = 0
+
+    def jql_side_effect(*_, **__):
+        nonlocal jql_side_effect_counter
+        jql_side_effect_counter = jql_side_effect_counter + 1
+        if jql_side_effect_counter == 1:
+            return _get_response("search")
+        else:
+            return _get_response("search_after")
+
+    mock_process_pool = mocker.patch("xraybot._worker.ProcessPoolExecutor.map")
+    mock_process_pool.side_effect = mock_side_effect
+    mocker.patch("xraybot._context.XrayBotContext.xray")
+    mock_jira = mocker.patch("xraybot._context.XrayBotContext.jira")
+    mock_jira.username = "username"
+    mock_jira.jql.side_effect = jql_side_effect
     mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
-    mocker.patch.object(xray_bot, "_xray")
     xray_bot.sync_tests(local_tests)
     # create 2 cases
     assert mock_jira.create_issue.call_args_list == [
@@ -219,16 +241,27 @@ def test_xray_sync_with_cf_value_str(mocker):
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
     xray_bot.configure_custom_field("Test Type", "Automated")
 
-    def mock_side_effect(fun, params):
-        for param in params:
-            fun(param)
+    def mock_side_effect(_, func_list, *iterables):
+        for idx, func in enumerate(func_list):
+            func(*list(zip(*iterables))[idx])
 
-    mock_process_pool_map = mocker.patch.object(_xray_bot.ProcessPoolExecutor, "map")
-    mock_process_pool_map.side_effect = mock_side_effect
-    mock_jira = mocker.patch.object(xray_bot, "_jira")
+    jql_side_effect_counter = 0
+
+    def jql_side_effect(*_, **__):
+        nonlocal jql_side_effect_counter
+        jql_side_effect_counter = jql_side_effect_counter + 1
+        if jql_side_effect_counter == 1:
+            return _get_response("search")
+        else:
+            return _get_response("search_after")
+
+    mock_process_pool = mocker.patch("xraybot._worker.ProcessPoolExecutor.map")
+    mock_process_pool.side_effect = mock_side_effect
+    mocker.patch("xraybot._context.XrayBotContext.xray")
+    mock_jira = mocker.patch("xraybot._context.XrayBotContext.jira")
+    mock_jira.username = "username"
+    mock_jira.jql.side_effect = jql_side_effect
     mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
-    mock_jira.jql.return_value = _get_response("search")
-    mocker.patch.object(xray_bot, "_xray")
     xray_bot.sync_tests(local_tests)
     # create 2 cases
     assert mock_jira.create_issue.call_args_list == [
@@ -278,16 +311,27 @@ def test_xray_sync_with_cf_value_list(mocker):
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
     xray_bot.configure_custom_field("Test Case Platform", ["Android"])
 
-    def mock_side_effect(fun, params):
-        for param in params:
-            fun(param)
+    def mock_side_effect(_, func_list, *iterables):
+        for idx, func in enumerate(func_list):
+            func(*list(zip(*iterables))[idx])
 
-    mock_process_pool_map = mocker.patch.object(_xray_bot.ProcessPoolExecutor, "map")
-    mock_process_pool_map.side_effect = mock_side_effect
-    mock_jira = mocker.patch.object(xray_bot, "_jira")
+    jql_side_effect_counter = 0
+
+    def jql_side_effect(*_, **__):
+        nonlocal jql_side_effect_counter
+        jql_side_effect_counter = jql_side_effect_counter + 1
+        if jql_side_effect_counter == 1:
+            return _get_response("search")
+        else:
+            return _get_response("search_after")
+
+    mock_process_pool = mocker.patch("xraybot._worker.ProcessPoolExecutor.map")
+    mock_process_pool.side_effect = mock_side_effect
+    mocker.patch("xraybot._context.XrayBotContext.xray")
+    mock_jira = mocker.patch("xraybot._context.XrayBotContext.jira")
+    mock_jira.username = "username"
+    mock_jira.jql.side_effect = jql_side_effect
     mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
-    mock_jira.jql.return_value = _get_response("search")
-    mocker.patch.object(xray_bot, "_xray")
     xray_bot.sync_tests(local_tests)
     # create 2 cases
     assert mock_jira.create_issue.call_args_list == [
@@ -345,16 +389,27 @@ def test_xray_sync_with_cf_value_str_list(mocker):
     xray_bot.configure_custom_field("Test Type", "Automated")
     xray_bot.configure_custom_field("Test Case Platform", ["Android"])
 
-    def mock_side_effect(fun, params):
-        for param in params:
-            fun(param)
+    def mock_side_effect(_, func_list, *iterables):
+        for idx, func in enumerate(func_list):
+            func(*list(zip(*iterables))[idx])
 
-    mock_process_pool_map = mocker.patch.object(_xray_bot.ProcessPoolExecutor, "map")
-    mock_process_pool_map.side_effect = mock_side_effect
-    mock_jira = mocker.patch.object(xray_bot, "_jira")
+    jql_side_effect_counter = 0
+
+    def jql_side_effect(*_, **__):
+        nonlocal jql_side_effect_counter
+        jql_side_effect_counter = jql_side_effect_counter + 1
+        if jql_side_effect_counter == 1:
+            return _get_response("search")
+        else:
+            return _get_response("search_after")
+
+    mock_process_pool = mocker.patch("xraybot._worker.ProcessPoolExecutor.map")
+    mock_process_pool.side_effect = mock_side_effect
+    mocker.patch("xraybot._context.XrayBotContext.xray")
+    mock_jira = mocker.patch("xraybot._context.XrayBotContext.jira")
+    mock_jira.username = "username"
+    mock_jira.jql.side_effect = jql_side_effect
     mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
-    mock_jira.jql.return_value = _get_response("search")
-    mocker.patch.object(xray_bot, "_xray")
     xray_bot.sync_tests(local_tests)
     # create 2 cases
     assert mock_jira.create_issue.call_args_list == [
@@ -405,10 +460,6 @@ def test_xray_sync_with_cf_value_str_list(mocker):
 def test_upload_results(mocker):
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
 
-    def mock_side_effect(fun, *args):
-        for arg in zip(*args):
-            fun(*arg)
-
     test_plan_id = 100
     test_exec_id = 101
     test_run_id = 10001
@@ -421,13 +472,18 @@ def test_upload_results(mocker):
         else:
             raise AssertionError(f"Unexpected create issue fields {fields}")
 
-    mock_process_pool_map = mocker.patch.object(_xray_bot.ProcessPoolExecutor, "map")
-    mock_process_pool_map.side_effect = mock_side_effect
-    mock_jira = mocker.patch.object(xray_bot, "_jira")
-    mock_jira.create_issue.side_effect = create_issue_side_effect
+    def mock_side_effect(_, func_list, *iterables):
+        for idx, func in enumerate(func_list):
+            func(*list(zip(*iterables))[idx])
+
+    mock_process_pool = mocker.patch("xraybot._worker.ProcessPoolExecutor.map")
+    mock_process_pool.side_effect = mock_side_effect
+    mock_xray = mocker.patch("xraybot._context.XrayBotContext.xray")
+    mock_jira = mocker.patch("xraybot._context.XrayBotContext.jira")
+    mock_jira.username = "username"
     mock_jira.jql.return_value = _get_response("search")
+    mock_jira.create_issue.side_effect = create_issue_side_effect
     mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
-    mock_xray = mocker.patch.object(xray_bot, "_xray")
     mock_xray.get_test_runs.return_value = [
         {"testExecKey": test_exec_id, "id": test_run_id}
     ]
@@ -472,4 +528,116 @@ def test_upload_results(mocker):
         call(test_run_id, "PASS"),
         call(test_run_id, "FAIL"),
         call(test_run_id, "TODO"),
+    ]
+
+
+def test_xray_sync_with_external_marked_tests(mocker):
+    xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
+
+    def mock_side_effect(_, func_list, *iterables):
+        for idx, func in enumerate(func_list):
+            func(*list(zip(*iterables))[idx])
+
+    def get_issue_side_effect(key, *_, **__):
+        if key == "DEMO-999":
+            return _get_response("get_issue")
+        else:
+            return mocker.MagicMock()
+
+    jql_side_effect_counter = 0
+
+    def jql_side_effect(*_, **__):
+        nonlocal jql_side_effect_counter
+        jql_side_effect_counter = jql_side_effect_counter + 1
+        if jql_side_effect_counter == 1:
+            return _get_response("search")
+        else:
+            return _get_response("search_after_with_marked")
+
+    get_issue_status_counter = 0
+
+    def get_issue_status_side_effect(key):
+        nonlocal get_issue_status_counter
+        get_issue_status_counter = get_issue_status_counter + 1
+        if key == "DEMO-999":
+            if get_issue_status_counter == 1:
+                return "In-Draft"
+            else:
+                return "Finalized"
+        else:
+            return mocker.MagicMock()
+
+    mock_process_pool = mocker.patch("xraybot._worker.ProcessPoolExecutor.map")
+    mock_process_pool.side_effect = mock_side_effect
+    mocker.patch("xraybot._context.XrayBotContext.xray")
+    mock_jira = mocker.patch("xraybot._context.XrayBotContext.jira")
+    mock_jira.username = "username"
+    mock_jira.jql.side_effect = jql_side_effect
+    mock_jira.get_issue.side_effect = get_issue_side_effect
+    mock_jira.get_issue_status.side_effect = get_issue_status_side_effect
+    mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
+    marked_test = TestEntity(
+        key="DEMO-999",
+        summary="Marked Foo",
+        description="Marked Foo desc",
+        req_key="REQ-109",
+        unique_identifier="tests/my-directory/test_marked.py::Foo_999",
+    )
+
+    xray_bot.sync_tests([*local_tests, marked_test])
+    # create 2 cases
+    assert mock_jira.create_issue.call_args_list == [
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Foo desc",
+                "summary": "Foo",
+                "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Foo",
+                "customfield_15095": {"value": "Generic"},
+            }
+        ),
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Bar desc",
+                "summary": "Bar",
+                "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Bar",
+                "customfield_15095": {"value": "Generic"},
+            }
+        ),
+    ]
+    # Obsolete one deleted test and finalize 2 new tests, 1 marked test
+    assert mock_jira.set_issue_status.call_args_list == [
+        call("DEMO-999", "Ready for Review"),
+        call("DEMO-999", "In Review"),
+        call("DEMO-999", "Finalized"),
+        call("DEMO-9", "Obsolete"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+    ]
+    # update case
+    assert mock_jira.update_issue_field.call_args_list == [
+        call(
+            key="DEMO-999",
+            fields={
+                "description": "Marked Foo desc",
+                "summary": "Marked Foo",
+                "assignee": {"name": "username"},
+                "reporter": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_marked.py::Foo_999",
+                "customfield_15095": {"value": "Generic"},
+            },
+        ),
+        call(
+            key="DEMO-11",
+            fields={"summary": "test_error", "description": "updated desc"},
+        ),
     ]

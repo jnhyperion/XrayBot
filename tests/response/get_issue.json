@@ -1,0 +1,37 @@
+{
+  "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+  "id": "1145158",
+  "self": "http://test.com/rest/api/2/issue/1145158",
+  "key": "DEMO-999",
+  "fields": {
+    "issuetype": {
+      "self": "http://test.com/rest/api/2/issuetype/11702",
+      "id": "11702",
+      "description": "Represents a Test",
+      "iconUrl": "http://test.com/download/resources/com.xpandit.plugins.xray/images/test.png",
+      "name": "Test",
+      "subtask": false
+    },
+    "project": {
+      "self": "http://test.com/rest/api/2/project/17422",
+      "id": "17422",
+      "key": "DEMO",
+      "name": "Demo Project",
+      "projectTypeKey": "software",
+      "avatarUrls": {
+        "48x48": "http://test.com/secure/projectavatar?avatarId=15734",
+        "24x24": "http://test.com/secure/projectavatar?size=small&avatarId=15734",
+        "16x16": "http://test.com/secure/projectavatar?size=xsmall&avatarId=15734",
+        "32x32": "http://test.com/secure/projectavatar?size=medium&avatarId=15734"
+      },
+      "projectCategory": {
+        "self": "http://test.com/rest/api/2/projectCategory/10900",
+        "id": "10900",
+        "description": "",
+        "name": "Xray Standalone"
+      }
+    },
+    "issuelinks": [],
+    "status": {"name": "Finalized"}
+  }
+}
