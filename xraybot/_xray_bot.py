@@ -154,6 +154,7 @@ class XrayBot:
         self._check_duplicated_uniqueness(
             local_tests, "Duplicated key/unique_identifier found in local_tests"
         )
+        self.worker_mgr.api_wrapper.init_automation_repo_folder()
         xray_tests = self.get_xray_tests()
         (
             non_marked_local_tests,

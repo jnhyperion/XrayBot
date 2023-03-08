@@ -10,25 +10,34 @@ from ._context import XrayBotContext
 class _XrayAPIWrapper:
     def __init__(self, context: XrayBotContext):
         self.context = context
-        self._automation_folder_id_cache = None
-        self._automation_obsolete_folder_id_cache = None
+        self.automation_folder_id_cache = None
+        self.automation_obsolete_folder_id_cache = None
+
+    def init_automation_repo_folder(self):
+        self.automation_folder_id_cache = self.create_repo_folder(
+            self.context.config.automation_folder_name, -1
+        )
+        self.automation_obsolete_folder_id_cache = self.create_repo_folder(
+            self.context.config.obsolete_automation_folder_name,
+            self.automation_folder_id_cache,
+        )
 
     @property
     def automation_folder_id(self):
-        if self._automation_folder_id_cache is None:
-            self._automation_folder_id_cache = self.create_repo_folder(
+        if self.automation_folder_id_cache is None:
+            self.automation_folder_id_cache = self.create_repo_folder(
                 self.context.config.automation_folder_name, -1
             )
-        return self._automation_folder_id_cache
+        return self.automation_folder_id_cache
 
     @property
     def automation_obsolete_folder_id(self):
-        if self._automation_obsolete_folder_id_cache is None:
-            self._automation_obsolete_folder_id_cache = self.create_repo_folder(
+        if self.automation_obsolete_folder_id_cache is None:
+            self.automation_obsolete_folder_id_cache = self.create_repo_folder(
                 self.context.config.obsolete_automation_folder_name,
                 self.automation_folder_id,
             )
-        return self._automation_obsolete_folder_id_cache
+        return self.automation_obsolete_folder_id_cache
 
     def delete_test(self, test_entity: TestEntity):
         logger.info(f"Start deleting test: {test_entity.key}")
@@ -135,6 +144,7 @@ class _XrayAPIWrapper:
         ), f"Marked test {test_entity.key} cannot be finalized."
 
     def renew_test_details(self, marked_test: TestEntity):
+        logger.info(f"Start renewing external marked test: {marked_test.key}")
         assert marked_test.key is not None, "Marked test key cannot be None"
         result = self.context.jira.get_issue(
             marked_test.key, fields=("project", "issuetype", "status")
@@ -157,6 +167,9 @@ class _XrayAPIWrapper:
             self.context.config.cf_id_test_definition: marked_test.unique_identifier,
             **self.context.config.get_tests_cf_label_fields(),
         }
+
+        if not self.context.config.labels:
+            fields["labels"] = []
 
         self.context.jira.update_issue_field(
             key=marked_test.key,

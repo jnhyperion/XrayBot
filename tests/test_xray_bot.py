@@ -634,6 +634,7 @@ def test_xray_sync_with_external_marked_tests(mocker):
                 "reporter": {"name": "username"},
                 "customfield_100": "tests/my-directory/test_marked.py::Foo_999",
                 "customfield_15095": {"value": "Generic"},
+                "labels": [],
             },
         ),
         call(
