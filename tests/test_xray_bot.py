@@ -488,9 +488,9 @@ def test_upload_results(mocker):
         {"testExecKey": test_exec_id, "id": test_run_id}
     ]
     test_results = [
+        TestResultEntity(key="DEMO-11", result=XrayResultType.TODO),
         TestResultEntity(key="DEMO-10", result=XrayResultType.PASS),
         TestResultEntity(key="DEMO-9", result=XrayResultType.FAIL),
-        TestResultEntity(key="DEMO-11", result=XrayResultType.TODO),
     ]
     xray_bot.upload_automation_results("test_plan", "test_exec", test_results)
     assert mock_jira.create_issue.call_args_list == [
@@ -525,9 +525,9 @@ def test_upload_results(mocker):
         call(100, add=[101])
     ]
     assert mock_xray.update_test_run_status.call_args_list == [
+        call(test_run_id, "TODO"),
         call(test_run_id, "PASS"),
         call(test_run_id, "FAIL"),
-        call(test_run_id, "TODO"),
     ]
 
 

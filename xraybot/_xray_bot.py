@@ -325,18 +325,18 @@ class XrayBot:
             test_execution_name
         )
         tests = self.get_xray_tests()
-        # add tests to test plan
+        # add tests to test plan based on all xray tests
         self.worker_mgr.start_worker(
             WorkerType.AddTestsToPlan,
             [test_plan_key for _ in range(len(tests))],
             [_.key for _ in tests],
         )
 
-        # add tests to test execution
+        # add tests to test execution based on local tests execution
         self.worker_mgr.start_worker(
             WorkerType.AddTestsToExecution,
-            [test_execution_key for _ in range(len(tests))],
-            [_.key for _ in tests],
+            [test_execution_key for _ in range(len(test_results))],
+            [_.key for _ in test_results],
         )
 
         logger.info(
