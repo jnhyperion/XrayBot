@@ -189,37 +189,31 @@ class XrayBot:
                     WorkerType.InternalMarkedTestUpdate, to_be_updated
                 )
             )
-        if non_marked_local_tests:
-            # non marked test -> strategy: unique identifier sync
-            # exclude internal marked local tests in xray tests
-            # do not need to proceed unique identifier sync
-            filtered_xray_tests = [
-                xray_test
-                for xray_test in xray_tests
-                if xray_test.key not in [_.key for _ in internal_marked_local_tests]
-            ]
-            (
-                to_be_deleted,
-                to_be_appended,
-                to_be_updated,
-            ) = self._get_non_marked_tests_diff(
-                filtered_xray_tests, non_marked_local_tests
+
+        # non marked test -> strategy: unique identifier sync
+        # exclude internal marked local tests in xray tests
+        # do not need to proceed unique identifier sync
+        filtered_xray_tests = [
+            xray_test
+            for xray_test in xray_tests
+            if xray_test.key not in [_.key for _ in internal_marked_local_tests]
+        ]
+        (
+            to_be_deleted,
+            to_be_appended,
+            to_be_updated,
+        ) = self._get_non_marked_tests_diff(filtered_xray_tests, non_marked_local_tests)
+        errors.extend(
+            self.worker_mgr.start_worker(
+                WorkerType.NonMarkedTestObsolete, to_be_deleted
             )
-            errors.extend(
-                self.worker_mgr.start_worker(
-                    WorkerType.NonMarkedTestObsolete, to_be_deleted
-                )
-            )
-            errors.extend(
-                self.worker_mgr.start_worker(
-                    WorkerType.NonMarkedTestCreate, to_be_appended
-                )
-            )
-            errors.extend(
-                self.worker_mgr.start_worker(
-                    WorkerType.NonMarkedTestUpdate, to_be_updated
-                )
-            )
+        )
+        errors.extend(
+            self.worker_mgr.start_worker(WorkerType.NonMarkedTestCreate, to_be_appended)
+        )
+        errors.extend(
+            self.worker_mgr.start_worker(WorkerType.NonMarkedTestUpdate, to_be_updated)
+        )
         return errors
 
     @staticmethod
