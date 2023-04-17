@@ -220,7 +220,7 @@ class XrayBot:
                     WorkerType.NonMarkedTestUpdate, to_be_updated
                 )
             )
-            return errors
+        return errors
 
     @staticmethod
     def _get_internal_marked_tests_diff(
