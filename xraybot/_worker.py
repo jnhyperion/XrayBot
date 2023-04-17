@@ -56,7 +56,9 @@ class _XrayAPIWrapper:
             self.context.jira.set_issue_status(test_entity.key, "In Review")
             self.context.jira.set_issue_status(test_entity.key, "Finalized")
         except Exception as e:
-            logger.warning(f"Finalize test with error: {e}")
+            raise AssertionError(
+                f"Finalize test {test_entity.key} with error: {e}"
+            ) from e
 
     def link_test(self, test_entity: TestEntity):
         if test_entity.req_key:
@@ -74,7 +76,9 @@ class _XrayAPIWrapper:
                 try:
                     self.context.jira.create_issue_link(link_param)
                 except Exception as e:
-                    logger.warning(f"Link test with error: {e}")
+                    raise AssertionError(
+                        f"Link requirement {_req_key} with error: {e}"
+                    ) from e
 
     def add_test_into_folder(self, test_entity: TestEntity, folder_id: int):
         try:
@@ -84,7 +88,9 @@ class _XrayAPIWrapper:
                 data={"add": [test_entity.key]},
             )
         except Exception as e:
-            logger.warning(f"Move test to repo folder with error: {e}")
+            raise AssertionError(
+                f"Move test {test_entity.key} to repo folder with error: {e}"
+            ) from e
 
     def remove_test_from_folder(self, test_entity: TestEntity, folder_id: int):
         self.context.xray.put(
@@ -136,7 +142,8 @@ class _XrayAPIWrapper:
             try:
                 self.context.jira.set_issue_status(test_entity.key, status)
             except Exception as e:
-                logger.warning(f"Update test status with error: {e}")
+                # ignore errors from any status
+                logger.debug(f"Update test status with error: {e}")
 
         status = self.context.jira.get_issue_status(test_entity.key)
         assert (
@@ -323,7 +330,7 @@ class _ExternalMarkedTestUpdateWorker(_XrayBotWorker):
     def run(self, test_entity: TestEntity):
         logger.info(f"Start updating external marked test: {test_entity.key}")
         self.api_wrapper.renew_test_details(test_entity)
-        self.api_wrapper.finalize_test(test_entity)
+        self.api_wrapper.finalize_test_from_any_status(test_entity)
         self.api_wrapper.remove_links(test_entity)
         self.api_wrapper.link_test(test_entity)
         self.api_wrapper.add_test_into_folder(
@@ -418,19 +425,26 @@ class XrayBotWorkerMgr:
     @staticmethod
     def _worker_wrapper(worker_func, *iterables):
         try:
-            ret = worker_func(*iterables)
-            return ret
+            worker_func(*iterables)
+            return None
         except Exception as e:
             logger.info(
                 f"Worker [{worker_func.__qualname__.split('.')[0].lstrip('_')}] raised error: {e}"
             )
-            raise e
+            converted = []
+            for i in iterables:
+                if isinstance(i, TestEntity):
+                    converted.append(i.__str__())
+                else:
+                    converted.append(i)
+            return f"❌{e} -> 🐛{' | '.join(converted)}"
 
     def start_worker(self, worker_type: WorkerType, *iterables):
         worker: _XrayBotWorker = worker_type.value(self.api_wrapper)
         with ProcessPoolExecutor(self.context.config.worker_num) as executor:
-            executor.map(
+            results = executor.map(
                 self._worker_wrapper,
                 [worker.run for _ in range(len(iterables[0]))],
                 *iterables,
             )
+            return list(results)

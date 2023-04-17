@@ -5,6 +5,7 @@ from copy import deepcopy
 from unittest.mock import call, ANY
 from xraybot import XrayBot, TestEntity, TestResultEntity, XrayResultType
 
+
 tests_dir = os.path.abspath(os.path.dirname(__file__))
 root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
@@ -171,9 +172,11 @@ def test_get_test_diff(requests_mock):
 def test_xray_sync(mocker):
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
 
-    def mock_side_effect(_, func_list, *iterables):
+    def mock_side_effect(worker_wrapper, func_list, *iterables):
+        results = []
         for idx, func in enumerate(func_list):
-            func(*list(zip(*iterables))[idx])
+            results.append(worker_wrapper(func, *list(zip(*iterables))[idx]))
+        return results
 
     jql_side_effect_counter = 0
 
@@ -192,7 +195,8 @@ def test_xray_sync(mocker):
     mock_jira.username = "username"
     mock_jira.jql.side_effect = jql_side_effect
     mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
-    xray_bot.sync_tests(local_tests)
+    ret = xray_bot.sync_tests(local_tests)
+    assert ret == [None] * 4
     # create 2 cases
     assert mock_jira.create_issue.call_args_list == [
         call(
@@ -241,9 +245,11 @@ def test_xray_sync_with_cf_value_str(mocker):
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
     xray_bot.configure_custom_field("Test Type", "Automated")
 
-    def mock_side_effect(_, func_list, *iterables):
+    def mock_side_effect(worker_wrapper, func_list, *iterables):
+        results = []
         for idx, func in enumerate(func_list):
-            func(*list(zip(*iterables))[idx])
+            results.append(worker_wrapper(func, *list(zip(*iterables))[idx]))
+        return results
 
     jql_side_effect_counter = 0
 
@@ -311,9 +317,11 @@ def test_xray_sync_with_cf_value_list(mocker):
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
     xray_bot.configure_custom_field("Test Case Platform", ["Android"])
 
-    def mock_side_effect(_, func_list, *iterables):
+    def mock_side_effect(worker_wrapper, func_list, *iterables):
+        results = []
         for idx, func in enumerate(func_list):
-            func(*list(zip(*iterables))[idx])
+            results.append(worker_wrapper(func, *list(zip(*iterables))[idx]))
+        return results
 
     jql_side_effect_counter = 0
 
@@ -389,9 +397,11 @@ def test_xray_sync_with_cf_value_str_list(mocker):
     xray_bot.configure_custom_field("Test Type", "Automated")
     xray_bot.configure_custom_field("Test Case Platform", ["Android"])
 
-    def mock_side_effect(_, func_list, *iterables):
+    def mock_side_effect(worker_wrapper, func_list, *iterables):
+        results = []
         for idx, func in enumerate(func_list):
-            func(*list(zip(*iterables))[idx])
+            results.append(worker_wrapper(func, *list(zip(*iterables))[idx]))
+        return results
 
     jql_side_effect_counter = 0
 
@@ -472,9 +482,11 @@ def test_upload_results(mocker):
         else:
             raise AssertionError(f"Unexpected create issue fields {fields}")
 
-    def mock_side_effect(_, func_list, *iterables):
+    def mock_side_effect(worker_wrapper, func_list, *iterables):
+        results = []
         for idx, func in enumerate(func_list):
-            func(*list(zip(*iterables))[idx])
+            results.append(worker_wrapper(func, *list(zip(*iterables))[idx]))
+        return results
 
     mock_process_pool = mocker.patch("xraybot._worker.ProcessPoolExecutor.map")
     mock_process_pool.side_effect = mock_side_effect
@@ -534,9 +546,11 @@ def test_upload_results(mocker):
 def test_xray_sync_with_external_marked_tests(mocker):
     xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
 
-    def mock_side_effect(_, func_list, *iterables):
+    def mock_side_effect(worker_wrapper, func_list, *iterables):
+        results = []
         for idx, func in enumerate(func_list):
-            func(*list(zip(*iterables))[idx])
+            results.append(worker_wrapper(func, *list(zip(*iterables))[idx]))
+        return results
 
     def get_issue_side_effect(key, *_, **__):
         if key == "DEMO-999":
@@ -637,6 +651,238 @@ def test_xray_sync_with_external_marked_tests(mocker):
                 "labels": [],
             },
         ),
+        call(
+            key="DEMO-11",
+            fields={"summary": "test_error", "description": "updated desc"},
+        ),
+    ]
+
+
+def test_xray_sync_with_lower_local_test_key(mocker):
+    xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
+
+    def mock_side_effect(worker_wrapper, func_list, *iterables):
+        results = []
+        for idx, func in enumerate(func_list):
+            results.append(worker_wrapper(func, *list(zip(*iterables))[idx]))
+        return results
+
+    def get_issue_side_effect(key, *_, **__):
+        if key == "DEMO-999":
+            return _get_response("get_issue")
+        else:
+            return mocker.MagicMock()
+
+    jql_side_effect_counter = 0
+
+    def jql_side_effect(*_, **__):
+        nonlocal jql_side_effect_counter
+        jql_side_effect_counter = jql_side_effect_counter + 1
+        if jql_side_effect_counter == 1:
+            return _get_response("search")
+        else:
+            return _get_response("search_after_with_marked")
+
+    get_issue_status_counter = 0
+
+    def get_issue_status_side_effect(key):
+        nonlocal get_issue_status_counter
+        get_issue_status_counter = get_issue_status_counter + 1
+        if key == "DEMO-999":
+            if get_issue_status_counter == 1:
+                return "In-Draft"
+            else:
+                return "Finalized"
+        else:
+            return mocker.MagicMock()
+
+    mock_process_pool = mocker.patch("xraybot._worker.ProcessPoolExecutor.map")
+    mock_process_pool.side_effect = mock_side_effect
+    mocker.patch("xraybot._context.XrayBotContext.xray")
+    mock_jira = mocker.patch("xraybot._context.XrayBotContext.jira")
+    mock_jira.username = "username"
+    mock_jira.jql.side_effect = jql_side_effect
+    mock_jira.get_issue.side_effect = get_issue_side_effect
+    mock_jira.get_issue_status.side_effect = get_issue_status_side_effect
+    mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
+    marked_test = TestEntity(
+        key="demo-999",
+        summary="Marked Foo",
+        description="Marked Foo desc",
+        req_key="REQ-109",
+        unique_identifier="tests/my-directory/test_marked.py::Foo_999",
+    )
+
+    ret = xray_bot.sync_tests([*local_tests, marked_test])
+    assert ret == [None] * 5
+    # create 2 cases
+    assert mock_jira.create_issue.call_args_list == [
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Foo desc",
+                "summary": "Foo",
+                "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Foo",
+                "customfield_15095": {"value": "Generic"},
+            }
+        ),
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Bar desc",
+                "summary": "Bar",
+                "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Bar",
+                "customfield_15095": {"value": "Generic"},
+            }
+        ),
+    ]
+    # Obsolete one deleted test and finalize 2 new tests, 1 marked test
+    assert mock_jira.set_issue_status.call_args_list == [
+        call("DEMO-999", "Ready for Review"),
+        call("DEMO-999", "In Review"),
+        call("DEMO-999", "Finalized"),
+        call("DEMO-9", "Obsolete"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+    ]
+    # update case
+    assert mock_jira.update_issue_field.call_args_list == [
+        call(
+            key="DEMO-999",
+            fields={
+                "description": "Marked Foo desc",
+                "summary": "Marked Foo",
+                "assignee": {"name": "username"},
+                "reporter": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_marked.py::Foo_999",
+                "customfield_15095": {"value": "Generic"},
+                "labels": [],
+            },
+        ),
+        call(
+            key="DEMO-11",
+            fields={"summary": "test_error", "description": "updated desc"},
+        ),
+    ]
+
+
+def test_xray_sync_partially_fail(mocker):
+    xray_bot = XrayBot(mock_url, mock_username, mock_pwd, mock_project_key)
+
+    def mock_side_effect(worker_wrapper, func_list, *iterables):
+        results = []
+        for idx, func in enumerate(func_list):
+            from xraybot._worker import _ExternalMarkedTestUpdateWorker
+
+            if isinstance(func.__self__, _ExternalMarkedTestUpdateWorker):
+
+                def _fail_mock(*_, **__):
+                    raise AssertionError("fail")
+
+                func = _fail_mock
+            results.append(worker_wrapper(func, *list(zip(*iterables))[idx]))
+        return results
+
+    def get_issue_side_effect(key, *_, **__):
+        if key == "DEMO-999":
+            return _get_response("get_issue")
+        else:
+            return mocker.MagicMock()
+
+    jql_side_effect_counter = 0
+
+    def jql_side_effect(*_, **__):
+        nonlocal jql_side_effect_counter
+        jql_side_effect_counter = jql_side_effect_counter + 1
+        if jql_side_effect_counter == 1:
+            return _get_response("search")
+        else:
+            return _get_response("search_after_with_marked")
+
+    get_issue_status_counter = 0
+
+    def get_issue_status_side_effect(key):
+        nonlocal get_issue_status_counter
+        get_issue_status_counter = get_issue_status_counter + 1
+        if key == "DEMO-999":
+            if get_issue_status_counter == 1:
+                return "In-Draft"
+            else:
+                return "Finalized"
+        else:
+            return mocker.MagicMock()
+
+    mock_process_pool = mocker.patch("xraybot._worker.ProcessPoolExecutor.map")
+    mock_process_pool.side_effect = mock_side_effect
+    mocker.patch("xraybot._context.XrayBotContext.xray")
+    mock_jira = mocker.patch("xraybot._context.XrayBotContext.jira")
+    mock_jira.username = "username"
+    mock_jira.jql.side_effect = jql_side_effect
+    mock_jira.get_issue.side_effect = get_issue_side_effect
+    mock_jira.get_issue_status.side_effect = get_issue_status_side_effect
+    mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
+    marked_test = TestEntity(
+        key="demo-999",
+        summary="Marked Foo",
+        description="Marked Foo desc",
+        req_key="REQ-109",
+        unique_identifier="tests/my-directory/test_marked.py::Foo_999",
+    )
+
+    ret = xray_bot.sync_tests([*local_tests, marked_test])
+    assert ret == [
+        "❌fail -> 🐛TestEntity(unique_identifier='tests/my-directory/test_marked.py::Foo_999', summary='Marked Foo', "
+        "description='Marked Foo desc', req_key='REQ-109', key='DEMO-999')",
+        None,
+        None,
+        None,
+        None,
+    ]
+    # create 2 cases
+    assert mock_jira.create_issue.call_args_list == [
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Foo desc",
+                "summary": "Foo",
+                "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Foo",
+                "customfield_15095": {"value": "Generic"},
+            }
+        ),
+        call(
+            {
+                "issuetype": {"name": "Test"},
+                "project": {"key": "DEMO"},
+                "description": "Bar desc",
+                "summary": "Bar",
+                "assignee": {"name": "username"},
+                "customfield_100": "tests/my-directory/test_demo.py::Bar",
+                "customfield_15095": {"value": "Generic"},
+            }
+        ),
+    ]
+    # Obsolete one deleted test and finalize 2 new tests, 1 marked test
+    assert mock_jira.set_issue_status.call_args_list == [
+        call("DEMO-9", "Obsolete"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+        call(ANY, "Ready for Review"),
+        call(ANY, "In Review"),
+        call(ANY, "Finalized"),
+    ]
+    # update case
+    assert mock_jira.update_issue_field.call_args_list == [
         call(
             key="DEMO-11",
             fields={"summary": "test_error", "description": "updated desc"},

@@ -150,7 +150,13 @@ class XrayBot:
             external_marked_local_tests,
         )
 
-    def sync_tests(self, local_tests: List[TestEntity]):
+    def sync_tests(self, local_tests: List[TestEntity]) -> List[str]:
+        errors = []
+        # make sure all local test keys will be considered as upper case
+        for local_test in local_tests:
+            if local_test.key is not None:
+                local_test.key = local_test.key.upper()
+
         self._check_duplicated_uniqueness(
             local_tests, "Duplicated key/unique_identifier found in local_tests"
         )
@@ -163,8 +169,10 @@ class XrayBot:
         ) = self._categorize_local_tests(xray_tests, local_tests)
         if external_marked_local_tests:
             # external marked test -> strategy: update and move to automation folder
-            self.worker_mgr.start_worker(
-                WorkerType.ExternalMarkedTestUpdate, external_marked_local_tests
+            errors.extend(
+                self.worker_mgr.start_worker(
+                    WorkerType.ExternalMarkedTestUpdate, external_marked_local_tests
+                )
             )
         if internal_marked_local_tests:
             # internal marked test -> strategy: update all fields including unique identifier
@@ -176,8 +184,10 @@ class XrayBot:
             to_be_updated = self._get_internal_marked_tests_diff(
                 filtered_xray_tests, internal_marked_local_tests
             )
-            self.worker_mgr.start_worker(
-                WorkerType.InternalMarkedTestUpdate, to_be_updated
+            errors.extend(
+                self.worker_mgr.start_worker(
+                    WorkerType.InternalMarkedTestUpdate, to_be_updated
+                )
             )
         if non_marked_local_tests:
             # non marked test -> strategy: unique identifier sync
@@ -195,11 +205,22 @@ class XrayBot:
             ) = self._get_non_marked_tests_diff(
                 filtered_xray_tests, non_marked_local_tests
             )
-            self.worker_mgr.start_worker(
-                WorkerType.NonMarkedTestObsolete, to_be_deleted
+            errors.extend(
+                self.worker_mgr.start_worker(
+                    WorkerType.NonMarkedTestObsolete, to_be_deleted
+                )
             )
-            self.worker_mgr.start_worker(WorkerType.NonMarkedTestCreate, to_be_appended)
-            self.worker_mgr.start_worker(WorkerType.NonMarkedTestUpdate, to_be_updated)
+            errors.extend(
+                self.worker_mgr.start_worker(
+                    WorkerType.NonMarkedTestCreate, to_be_appended
+                )
+            )
+            errors.extend(
+                self.worker_mgr.start_worker(
+                    WorkerType.NonMarkedTestUpdate, to_be_updated
+                )
+            )
+            return errors
 
     @staticmethod
     def _get_internal_marked_tests_diff(
