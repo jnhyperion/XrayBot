@@ -104,10 +104,19 @@ class _XrayBotConfig:
 
 class XrayBotContext:
     def __init__(
-        self, jira_url: str, jira_username: str, jira_pwd: str, project_key: str
+        self,
+        jira_url: str,
+        jira_username: str,
+        jira_pwd: str,
+        project_key: str,
+        timeout: int,
     ):
-        self._jira: Jira = Jira(url=jira_url, username=jira_username, password=jira_pwd)
-        self._xray: Xray = Xray(url=jira_url, username=jira_username, password=jira_pwd)
+        self._jira: Jira = Jira(
+            url=jira_url, username=jira_username, password=jira_pwd, timeout=timeout
+        )
+        self._xray: Xray = Xray(
+            url=jira_url, username=jira_username, password=jira_pwd, timeout=timeout
+        )
         self._project_key: str = project_key
         self._config = _XrayBotConfig(self._jira)
 

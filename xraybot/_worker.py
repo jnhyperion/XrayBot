@@ -2,7 +2,7 @@ from abc import abstractmethod
 from enum import Enum
 from typing import List
 from concurrent.futures.process import ProcessPoolExecutor
-from ._data import TestEntity
+from ._data import TestEntity, WorkResult
 from ._utils import logger
 from ._context import XrayBotContext
 
@@ -138,7 +138,7 @@ class _XrayAPIWrapper:
         if status == "Finalized":
             return
 
-        for status in ["Ready for Review", "In Review", "Finalized"]:
+        for status in ["In-Draft", "Ready for Review", "In Review", "Finalized"]:
             try:
                 self.context.jira.set_issue_status(test_entity.key, status)
             except Exception as e:
@@ -310,6 +310,25 @@ class _NonMarkedTestCreateWorker(_XrayBotWorker):
         )
 
 
+class _DraftTestCreateWorker(_XrayBotWorker):
+    def run(self, test_entity: TestEntity):
+        logger.info(f"Start creating test draft: {test_entity.summary}")
+
+        fields = {
+            "issuetype": {"name": "Test"},
+            "project": {"key": self.context.project_key},
+            "description": test_entity.description,
+            "summary": f"[🤖Automation Draft] {test_entity.summary}",
+            "assignee": {"name": self.context.jira.username},
+            self.context.config.cf_id_test_definition: test_entity.unique_identifier,
+            **self.context.config.get_tests_cf_label_fields(),
+        }
+
+        test_entity.key = self.context.jira.create_issue(fields)["key"]
+        logger.info(f"Created xray test draft: {test_entity.key}")
+        return test_entity
+
+
 class _NonMarkedTestUpdateWorker(_XrayBotWorker):
     def run(self, test_entity: TestEntity):
         logger.info(f"Start updating test: {test_entity.key}")
@@ -404,6 +423,20 @@ class _CleanTestPlanWorker(_XrayBotWorker):
             self.context.xray.delete_test_from_test_plan(test_plan_key, test_key)
 
 
+class _JiraStatusBulkCheckWorker(_XrayBotWorker):
+    def run(self, jira_keys: List[str]):
+        logger.info(f"Bulk checking jira status: {jira_keys}...")
+        results = self.context.jira.bulk_issue(jira_keys, fields="status")
+        results = [
+            (issue["key"], issue["fields"]["status"]["name"])
+            for issue in results[0]["issues"]
+        ]
+        assert len(results) == len(
+            jira_keys
+        ), f"Not enough jira status found: {results}"
+        return results
+
+
 class WorkerType(Enum):
     NonMarkedTestObsolete = _NonMarkedTestObsoleteWorker
     NonMarkedTestCreate = _NonMarkedTestCreateWorker
@@ -415,6 +448,8 @@ class WorkerType(Enum):
     UpdateTestResults = _UpdateTestResultsWorker
     CleanTestExecution = _CleanTestExecutionWorker
     CleanTestPlan = _CleanTestPlanWorker
+    JiraStatusBulkCheck = _JiraStatusBulkCheckWorker
+    DraftTestCreate = _DraftTestCreateWorker
 
 
 class XrayBotWorkerMgr:
@@ -423,23 +458,19 @@ class XrayBotWorkerMgr:
         self.api_wrapper = _XrayAPIWrapper(self.context)
 
     @staticmethod
-    def _worker_wrapper(worker_func, *iterables):
+    def _worker_wrapper(worker_func, *iterables) -> WorkResult:
         try:
-            worker_func(*iterables)
-            return None
+            ret = worker_func(*iterables)
+            return WorkResult(success=True, data=ret)
         except Exception as e:
             logger.info(
                 f"Worker [{worker_func.__qualname__.split('.')[0].lstrip('_')}] raised error: {e}"
             )
-            converted = []
-            for i in iterables:
-                if isinstance(i, TestEntity):
-                    converted.append(i.__str__())
-                else:
-                    converted.append(i)
-            return f"❌{e} -> 🐛{' | '.join(converted)}"
+            converted = [str(_) for _ in iterables]
+            err_msg = f"❌{e} -> 🐛{' | '.join(converted)}"
+            return WorkResult(success=False, data=err_msg)
 
-    def start_worker(self, worker_type: WorkerType, *iterables):
+    def start_worker(self, worker_type: WorkerType, *iterables) -> List[WorkResult]:
         worker: _XrayBotWorker = worker_type.value(self.api_wrapper)
         with ProcessPoolExecutor(self.context.config.worker_num) as executor:
             results = executor.map(

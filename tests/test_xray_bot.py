@@ -195,8 +195,7 @@ def test_xray_sync(mocker):
     mock_jira.username = "username"
     mock_jira.jql.side_effect = jql_side_effect
     mock_jira.get_all_custom_fields.return_value = _get_response("custom_fields")
-    ret = xray_bot.sync_tests(local_tests)
-    assert ret == [None] * 4
+    xray_bot.sync_tests(local_tests)
     # create 2 cases
     assert mock_jira.create_issue.call_args_list == [
         call(
@@ -504,7 +503,7 @@ def test_upload_results(mocker):
         TestResultEntity(key="DEMO-10", result=XrayResultType.PASS),
         TestResultEntity(key="DEMO-9", result=XrayResultType.FAIL),
     ]
-    xray_bot.upload_automation_results("test_plan", "test_exec", test_results)
+    xray_bot.upload_test_results("test_plan", "test_exec", test_results)
     assert mock_jira.create_issue.call_args_list == [
         call(
             {
@@ -626,6 +625,7 @@ def test_xray_sync_with_external_marked_tests(mocker):
     ]
     # Obsolete one deleted test and finalize 2 new tests, 1 marked test
     assert mock_jira.set_issue_status.call_args_list == [
+        call("DEMO-999", "In-Draft"),
         call("DEMO-999", "Ready for Review"),
         call("DEMO-999", "In Review"),
         call("DEMO-999", "Finalized"),
@@ -713,8 +713,7 @@ def test_xray_sync_with_lower_local_test_key(mocker):
         unique_identifier="tests/my-directory/test_marked.py::Foo_999",
     )
 
-    ret = xray_bot.sync_tests([*local_tests, marked_test])
-    assert ret == [None] * 5
+    xray_bot.sync_tests([*local_tests, marked_test])
     # create 2 cases
     assert mock_jira.create_issue.call_args_list == [
         call(
@@ -742,6 +741,7 @@ def test_xray_sync_with_lower_local_test_key(mocker):
     ]
     # Obsolete one deleted test and finalize 2 new tests, 1 marked test
     assert mock_jira.set_issue_status.call_args_list == [
+        call("DEMO-999", "In-Draft"),
         call("DEMO-999", "Ready for Review"),
         call("DEMO-999", "In Review"),
         call("DEMO-999", "Finalized"),
@@ -836,16 +836,10 @@ def test_xray_sync_partially_fail(mocker):
         req_key="REQ-109",
         unique_identifier="tests/my-directory/test_marked.py::Foo_999",
     )
-
-    ret = xray_bot.sync_tests([*local_tests, marked_test])
-    assert ret == [
-        "❌fail -> 🐛TestEntity(unique_identifier='tests/my-directory/test_marked.py::Foo_999', summary='Marked Foo', "
-        "description='Marked Foo desc', req_key='REQ-109', key='DEMO-999')",
-        None,
-        None,
-        None,
-        None,
-    ]
+    with pytest.raises(AssertionError) as e:
+        xray_bot.sync_tests([*local_tests, marked_test])
+    err_msg = "❌fail -> 🐛TestEntity(unique_identifier='tests/my-directory/test_marked.py::Foo_999', summary='Marked Foo', description='Marked Foo desc', req_key='REQ-109', key='DEMO-999')"
+    assert err_msg in e.value.args[0]
     # create 2 cases
     assert mock_jira.create_issue.call_args_list == [
         call(

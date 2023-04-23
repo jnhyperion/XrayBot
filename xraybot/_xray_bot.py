@@ -1,3 +1,4 @@
+import copy
 from typing import List, Tuple, Union
 from ._context import XrayBotContext
 from ._data import TestEntity, TestResultEntity
@@ -13,7 +14,7 @@ _CF_TEST_TYPE_VAL_CUCUMBER = "Cucumber"
 
 
 class XrayBot:
-
+    _JIRA_API_TIMEOUT = 75
     _QUERY_PAGE_LIMIT = 100
     _MULTI_PROCESS_WORKER_NUM = 30
     _AUTOMATION_TESTS_FOLDER_NAME = "Automation Test"
@@ -28,7 +29,13 @@ class XrayBot:
         :param jira_pwd: str
         :param project_key: str, jira project key, e.g: "TEST"
         """
-        self.context = XrayBotContext(jira_url, jira_username, jira_pwd, project_key)
+        self.context = XrayBotContext(
+            jira_url,
+            jira_username,
+            jira_pwd,
+            project_key,
+            timeout=self._JIRA_API_TIMEOUT,
+        )
         self.config = self.context.config
         self.config.configure_query_page_limit(self._QUERY_PAGE_LIMIT)
         self.config.configure_worker_num(self._MULTI_PROCESS_WORKER_NUM)
@@ -150,8 +157,53 @@ class XrayBot:
             external_marked_local_tests,
         )
 
-    def sync_tests(self, local_tests: List[TestEntity]) -> List[str]:
-        errors = []
+    def create_tests_draft(self, local_tests: List[TestEntity]) -> List[TestEntity]:
+        """
+        Input: local tests including no existing jira key
+        Output: local tests with draft tests created and key has been appended to test entity
+        """
+        local_tests_with_keys = copy.deepcopy(local_tests)
+        # make sure all local test keys will be considered as upper case
+        for local_test in local_tests_with_keys:
+            if local_test.key is not None:
+                local_test.key = local_test.key.upper()
+
+        self._check_duplicated_uniqueness(
+            local_tests_with_keys,
+            "Duplicated key/unique_identifier found in local tests",
+        )
+        xray_tests = self.get_xray_tests()
+
+        def get_test_key_by_unique_identifier(_local_test: TestEntity):
+            for xray_test in xray_tests:
+                if xray_test.unique_identifier == local_test.unique_identifier:
+                    return xray_test.key
+            return None
+
+        to_be_created = []
+        to_be_remained = []
+        for local_test in local_tests_with_keys:
+            if local_test.key is None:
+                # tests have no key but already synced by unique identifier
+                existing_key = get_test_key_by_unique_identifier(local_test)
+                if existing_key is not None:
+                    local_test.key = existing_key
+                else:
+                    to_be_created.append(local_test)
+                    continue
+            to_be_remained.append(local_test)
+
+        worker_results = self.worker_mgr.start_worker(
+            WorkerType.DraftTestCreate, to_be_created
+        )
+        errors = [result.data for result in worker_results if not result.success]
+        err_msg = "\n".join(errors)
+        assert len(errors) == 0, f"Create draft test failed:\n {err_msg}"
+        results = to_be_remained + [_.data for _ in worker_results]
+        return results
+
+    def sync_tests(self, local_tests: List[TestEntity]):
+        worker_results = []
         # make sure all local test keys will be considered as upper case
         for local_test in local_tests:
             if local_test.key is not None:
@@ -169,7 +221,7 @@ class XrayBot:
         ) = self._categorize_local_tests(xray_tests, local_tests)
         if external_marked_local_tests:
             # external marked test -> strategy: update and move to automation folder
-            errors.extend(
+            worker_results.extend(
                 self.worker_mgr.start_worker(
                     WorkerType.ExternalMarkedTestUpdate, external_marked_local_tests
                 )
@@ -184,7 +236,7 @@ class XrayBot:
             to_be_updated = self._get_internal_marked_tests_diff(
                 filtered_xray_tests, internal_marked_local_tests
             )
-            errors.extend(
+            worker_results.extend(
                 self.worker_mgr.start_worker(
                     WorkerType.InternalMarkedTestUpdate, to_be_updated
                 )
@@ -203,18 +255,23 @@ class XrayBot:
             to_be_appended,
             to_be_updated,
         ) = self._get_non_marked_tests_diff(filtered_xray_tests, non_marked_local_tests)
-        errors.extend(
+        worker_results.extend(
             self.worker_mgr.start_worker(
                 WorkerType.NonMarkedTestObsolete, to_be_deleted
             )
         )
-        errors.extend(
+        worker_results.extend(
             self.worker_mgr.start_worker(WorkerType.NonMarkedTestCreate, to_be_appended)
         )
-        errors.extend(
+        worker_results.extend(
             self.worker_mgr.start_worker(WorkerType.NonMarkedTestUpdate, to_be_updated)
         )
-        return errors
+        errors = [_.data for _ in worker_results if not _.success]
+        if len(errors) > 0:
+            err_msg = ""
+            for idx, err in enumerate(errors):
+                err_msg = f"{err_msg}\n({idx + 1}) {err}"
+            raise AssertionError(f"Sync failed with the following errors:\n{err_msg}.")
 
     @staticmethod
     def _get_internal_marked_tests_diff(
@@ -328,7 +385,7 @@ class XrayBot:
             test_plan_tests,
         )
 
-    def upload_automation_results(
+    def upload_test_results(
         self,
         test_plan_name: str,
         test_execution_name: str,
@@ -370,3 +427,75 @@ class XrayBot:
             [result.result.value for result in test_results],
             [test_execution_key for _ in range(len(test_results))],
         )
+
+    def upload_test_results_by_execution_key(
+        self,
+        test_results: List[TestResultEntity],
+        test_execution_key: str,
+    ):
+        # add tests to test execution based on local tests execution
+        self.worker_mgr.start_worker(
+            WorkerType.AddTestsToExecution,
+            [test_execution_key for _ in range(len(test_results))],
+            [_.key for _ in test_results],
+        )
+
+        # update test execution result
+        self.worker_mgr.start_worker(
+            WorkerType.UpdateTestResults,
+            [result.key for result in test_results],
+            [result.result.value for result in test_results],
+            [test_execution_key for _ in range(len(test_results))],
+        )
+
+    def sync_check(self, local_tests: List[TestEntity]):
+        """
+        1. make sure all local tests have been marked with keys
+        2. make sure all the uniqueness of local tests keys and unique identifiers
+        2. make sure all test keys are valid and not obsolete
+        3. make sure requirement keys are valid
+        """
+        test_keys = [_.key for _ in local_tests]
+        req_keys = [_.req_key for _ in local_tests]
+        assert (
+            None not in test_keys
+        ), "Some of the tests are not are not marked with test key, run sync prepare firstly."
+
+        self._check_duplicated_uniqueness(
+            local_tests, "Duplicated key/unique_identifier found in local tests"
+        )
+
+        def chunks(xs, n=20):
+            n = max(1, n)
+            return list(xs[i : i + n] for i in range(0, len(xs), n))
+
+        results = self.worker_mgr.start_worker(
+            WorkerType.JiraStatusBulkCheck, chunks(test_keys)
+        )
+        errors = []
+        test_status_results = []
+        for result in results:
+            if not result.success:
+                errors.append(f"Get test status failed: {result}")
+            else:
+                test_status_results.extend(result.data)
+        for test_key, status in test_status_results:
+            if status == "Obsolete":
+                errors.append(f"Test status is obsolete: {test_key}")
+
+        merged_req_keys = []
+        for req_key in req_keys:
+            if req_key:
+                merged_req_keys.extend(req_key.split(","))
+        merged_req_keys = list(set(merged_req_keys))
+        results = self.worker_mgr.start_worker(
+            WorkerType.JiraStatusBulkCheck, chunks(merged_req_keys)
+        )
+        for result in results:
+            if not result.success:
+                errors.append(f"Get requirement status failed: {result}")
+        if errors:
+            err_msg = ""
+            for idx, err in enumerate(errors):
+                err_msg = f"{err_msg}\n({idx + 1}) {err}"
+            raise AssertionError(f"Found following errors:{err_msg}")
