@@ -1,0 +1,25 @@
+{
+  "folders": [
+    {
+      "rank": 1,
+      "name": "Automation Test",
+      "id": 1795,
+      "testCount": 10,
+      "totalTestCount": 10,
+      "testRepositoryPath": "",
+      "folders": [
+        {
+          "rank": 1,
+          "name": "Obsolete",
+          "id": 1796,
+          "testCount": 0,
+          "totalTestCount": 0,
+          "testRepositoryPath": "/Automation Test",
+          "folders": []
+        }
+      ]
+    }
+  ],
+  "allTestsCount": 10,
+  "allOrphanTestsCount": 0
+}

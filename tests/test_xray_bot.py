@@ -20,6 +20,9 @@ mock_username = "username"
 mock_pwd = "pwd"
 mock_project_key = "DEMO"
 mock_get_cf_request = f"{mock_url}/rest/api/2/field"
+mock_get_folder_request = (
+    f"{mock_url}/rest/raven/1.0/api/testrepository/{mock_project_key}/folders"
+)
 mock_search_request = (
     f"{mock_url}/rest/api/2/search?startAt=0&maxResults=-1&"
     f"fields=summary%2Cdescription%2Cissuelinks%2Ccustomfield_100&"
@@ -90,6 +93,7 @@ def setup(requests_mock):
     local_test2.key = None
     local_test3.key = None
     requests_mock.get(mock_get_cf_request, json=_get_response("custom_fields"))
+    requests_mock.get(mock_get_folder_request, json=_get_response("folder"))
     yield
 
 

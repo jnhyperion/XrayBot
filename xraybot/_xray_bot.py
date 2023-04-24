@@ -62,6 +62,9 @@ class XrayBot:
         logger.info(
             f"Start querying all xray tests for project: {self.context.project_key}"
         )
+        folder_id = self.worker_mgr.api_wrapper.automation_folder_id
+        assert folder_id is not None
+        # jql requires automation folder, need to make sure the folder exists
         jql = (
             f'project = "{self.context.project_key}" and type = "Test" and reporter = '
             f'"{self.context.jira_username}" '
