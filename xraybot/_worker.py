@@ -189,7 +189,7 @@ class _XrayAPIWrapper:
             f'reporter= "{self.context.jira_username}"'
         )
 
-        for _ in self.context.jira.jql(jql, limit=-1)["issues"]:
+        for _ in self.context.jira.jql(jql, fields=["summary"], limit=-1)["issues"]:
             if _["fields"]["summary"] == test_plan_name:
                 key = _["key"]
                 logger.info(f"Found existing test plan: {key}")
@@ -212,8 +212,7 @@ class _XrayAPIWrapper:
             f'project = "{self.context.project_key}" and type="Test Execution" '
             f'and reporter= "{self.context.jira_username}"'
         )
-
-        for _ in self.context.jira.jql(jql, limit=-1)["issues"]:
+        for _ in self.context.jira.jql(jql, fields=["summary"], limit=-1)["issues"]:
             if _["fields"]["summary"] == test_execution_name:
                 key = _["key"]
                 logger.info(f"Found existing test execution: {key}")
