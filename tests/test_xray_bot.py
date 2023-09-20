@@ -536,8 +536,8 @@ def test_upload_results(mocker):
         call(test_exec_id, add=["DEMO-10"]),
         call(test_exec_id, add=["DEMO-9"]),
     ]
-    assert mock_xray.update_test_plan_test_executions.call_args_list == [
-        call(100, add=[101])
+    assert mock_jira.update_issue_field.call_args_list == [
+        call(101, fields={None: [100]})
     ]
     assert mock_xray.update_test_run_status.call_args_list == [
         call(test_run_id, "TODO"),

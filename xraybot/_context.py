@@ -2,6 +2,7 @@ from typing import List, Union, Dict
 from atlassian import Jira, Xray
 
 _CF_TEST_DEFINITION = "Generic Test Definition"
+_CF_TEST_PLAN = "Test Plan"
 _CF_TEST_TYPE = "Test Type"
 _CF_TEST_TYPE_VAL_GENERIC = "Generic"
 _CF_TEST_TYPE_VAL_MANUAL = "Manual"
@@ -80,6 +81,10 @@ class _XrayBotConfig:
     @property
     def cf_id_test_definition(self):
         return self._get_custom_field_by_name(_CF_TEST_DEFINITION)
+
+    @property
+    def cf_id_test_plan(self):
+        return self._get_custom_field_by_name(_CF_TEST_PLAN)
 
     def _get_custom_field_by_name(self, name: str):
         if not self._cached_all_custom_fields:

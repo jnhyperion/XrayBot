@@ -417,8 +417,12 @@ class XrayBot:
         logger.info(
             f"Start adding test execution {test_execution_key} to test plan {test_plan_key}"
         )
-        self.context.xray.update_test_plan_test_executions(
-            test_plan_key, add=[test_execution_key]
+        # self.context.xray.update_test_plan_test_executions(
+        #     test_plan_key, add=[test_execution_key]
+        # )
+        # workaround for xray testplan API performance issue
+        self.context.jira.update_issue_field(
+            test_execution_key, fields={self.config.cf_id_test_plan: [test_plan_key]}
         )
 
         if clean_test_plan_and_execution:
