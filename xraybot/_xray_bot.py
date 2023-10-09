@@ -466,7 +466,7 @@ class XrayBot:
         req_keys = [_.req_key for _ in local_tests]
         assert (
             None not in test_keys
-        ), "Some of the tests are not are not marked with test key, run sync prepare firstly."
+        ), "Some of the tests are not marked with test key, run sync prepare firstly."
 
         self._check_duplicated_uniqueness(
             local_tests, "Duplicated key/unique_identifier found in local tests"
