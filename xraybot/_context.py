@@ -14,7 +14,6 @@ class _XrayBotConfig:
         self._jira = jira
         self._custom_fields: Dict[str, Union[str, List[str]]] = {}
         self._cached_all_custom_fields = None
-        self._labels: List[str] = []
         self._query_page_limit: int = 100
         self._worker_num: int = 30
         self._automation_folder_name = "Automation Test"
@@ -50,10 +49,6 @@ class _XrayBotConfig:
         return self._obsolete_automation_folder_name
 
     @property
-    def labels(self):
-        return self._labels
-
-    @property
     def custom_fields(self):
         return self._custom_fields
 
@@ -75,9 +70,6 @@ class _XrayBotConfig:
         ), f'Custom field "{field_name}" is not configurable.'
         self._custom_fields[field_name] = field_value
 
-    def configure_labels(self, labels: List[str]):
-        self._labels = labels
-
     @property
     def cf_id_test_definition(self):
         return self._get_custom_field_by_name(_CF_TEST_DEFINITION)
@@ -93,7 +85,7 @@ class _XrayBotConfig:
             if f["name"] == name:
                 return f["id"]
 
-    def get_tests_cf_label_fields(self):
+    def get_tests_custom_fields_payload(self):
         fields = dict()
         for k, v in self._custom_fields.items():
             custom_field = self._get_custom_field_by_name(k)
@@ -101,9 +93,6 @@ class _XrayBotConfig:
                 fields[custom_field] = [{"value": _} for _ in v]
             else:
                 fields[custom_field] = {"value": v}
-
-        if self._labels:
-            fields["labels"] = self._labels
         return fields
 
 

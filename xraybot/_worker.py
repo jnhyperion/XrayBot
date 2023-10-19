@@ -2,7 +2,7 @@ from abc import abstractmethod
 from enum import Enum
 from typing import List
 from concurrent.futures.process import ProcessPoolExecutor
-from ._data import TestEntity, WorkResult
+from ._data import TestEntity, WorkerResult, TestResultEntity
 from ._utils import logger
 from ._context import XrayBotContext
 
@@ -46,39 +46,36 @@ class _XrayAPIWrapper:
     def remove_links(self, test_entity: TestEntity):
         issue = self.context.jira.get_issue(test_entity.key)
         for link in issue["fields"]["issuelinks"]:
-            if link["type"]["name"] == "Tests":
+            if link["type"]["name"] in ("Tests", "Defect"):
                 self.context.jira.remove_issue_link(link["id"])
 
-    def finalize_test(self, test_entity: TestEntity):
-        logger.info(f"Start finalizing test: {test_entity.key}")
-        try:
-            self.context.jira.set_issue_status(test_entity.key, "Ready for Review")
-            self.context.jira.set_issue_status(test_entity.key, "In Review")
-            self.context.jira.set_issue_status(test_entity.key, "Finalized")
-        except Exception as e:
-            raise AssertionError(
-                f"Finalize test {test_entity.key} with error: {e}"
-            ) from e
-
     def link_test(self, test_entity: TestEntity):
-        if test_entity.req_key:
-            # support multi req keys
-            req_key_list = test_entity.req_key.split(",")
-            for _req_key in req_key_list:
-                logger.info(
-                    f"Start linking test {test_entity.key} to requirement: {_req_key}"
-                )
-                link_param = {
-                    "type": {"name": "Tests"},
-                    "inwardIssue": {"key": test_entity.key},
-                    "outwardIssue": {"key": _req_key},
-                }
-                try:
-                    self.context.jira.create_issue_link(link_param)
-                except Exception as e:
-                    raise AssertionError(
-                        f"Link requirement {_req_key} with error: {e}"
-                    ) from e
+        for req_key in test_entity.req_keys:
+            logger.info(
+                f"Start linking test {test_entity.key} to requirement: {req_key}"
+            )
+            link_param = {
+                "type": {"name": "Tests"},
+                "inwardIssue": {"key": test_entity.key},
+                "outwardIssue": {"key": req_key},
+            }
+            try:
+                self.context.jira.create_issue_link(link_param)
+            except Exception as e:
+                raise AssertionError(
+                    f"Link requirement {req_key} with error: {e}"
+                ) from e
+        for defect_key in test_entity.defect_keys:
+            logger.info(f"Start linking test {test_entity.key} to defect: {defect_key}")
+            link_param = {
+                "type": {"name": "Defect"},
+                "inwardIssue": {"key": test_entity.key},
+                "outwardIssue": {"key": defect_key},
+            }
+            try:
+                self.context.jira.create_issue_link(link_param)
+            except Exception as e:
+                raise AssertionError(f"Link defect {defect_key} with error: {e}") from e
 
     def add_test_into_folder(self, test_entity: TestEntity, folder_id: int):
         try:
@@ -133,7 +130,7 @@ class _XrayAPIWrapper:
         return folder_id
 
     def finalize_test_from_any_status(self, test_entity: TestEntity):
-        logger.info(f"Start finalizing marked test: {test_entity.key}")
+        logger.info(f"Start finalizing test: {test_entity.key}")
         status = self.context.jira.get_issue_status(test_entity.key)
         if status == "Finalized":
             return
@@ -143,12 +140,10 @@ class _XrayAPIWrapper:
                 self.context.jira.set_issue_status(test_entity.key, status)
             except Exception as e:
                 # ignore errors from any status
-                logger.debug(f"Update test status with error: {e}")
+                logger.debug(f"Finalize test with error: {e}")
 
         status = self.context.jira.get_issue_status(test_entity.key)
-        assert (
-            status == "Finalized"
-        ), f"Marked test {test_entity.key} cannot be finalized."
+        assert status == "Finalized", f"Test {test_entity.key} cannot be finalized."
 
     def renew_test_details(self, marked_test: TestEntity):
         logger.info(f"Start renewing external marked test: {marked_test.key}")
@@ -162,22 +157,15 @@ class _XrayAPIWrapper:
         assert (
             result["fields"]["issuetype"]["name"] == "Test"
         ), f"Marked test {marked_test.key} is not a test at all."
-        assert (
-            result["fields"]["status"]["name"] != "Obsolete"
-        ), f"Marked test {marked_test.key} is obsolete."
-
         fields = {
             "description": marked_test.description,
             "summary": marked_test.summary,
             "assignee": {"name": self.context.jira.username},
             "reporter": {"name": self.context.jira.username},
+            "labels": marked_test.labels,
             self.context.config.cf_id_test_definition: marked_test.unique_identifier,
-            **self.context.config.get_tests_cf_label_fields(),
+            **self.context.config.get_tests_custom_fields_payload(),
         }
-
-        if not self.context.config.labels:
-            fields["labels"] = []
-
         self.context.jira.update_issue_field(
             key=marked_test.key,
             fields=fields,
@@ -273,7 +261,7 @@ class _XrayBotWorker:
         pass
 
 
-class _NonMarkedTestObsoleteWorker(_XrayBotWorker):
+class _ObsoleteTestWorker(_XrayBotWorker):
     def run(self, test_entity: TestEntity):
         logger.info(f"Start obsoleting test: {test_entity.key}")
         self.context.jira.set_issue_status(test_entity.key, "Obsolete")
@@ -283,29 +271,6 @@ class _NonMarkedTestObsoleteWorker(_XrayBotWorker):
         )
         self.api_wrapper.add_test_into_folder(
             test_entity, self.api_wrapper.automation_obsolete_folder_id
-        )
-
-
-class _NonMarkedTestCreateWorker(_XrayBotWorker):
-    def run(self, test_entity: TestEntity):
-        logger.info(f"Start creating test: {test_entity.summary}")
-
-        fields = {
-            "issuetype": {"name": "Test"},
-            "project": {"key": self.context.project_key},
-            "description": test_entity.description,
-            "summary": test_entity.summary,
-            "assignee": {"name": self.context.jira.username},
-            self.context.config.cf_id_test_definition: test_entity.unique_identifier,
-            **self.context.config.get_tests_cf_label_fields(),
-        }
-
-        test_entity.key = self.context.jira.create_issue(fields)["key"]
-        logger.info(f"Created xray test: {test_entity.key}")
-        self.api_wrapper.finalize_test(test_entity)
-        self.api_wrapper.link_test(test_entity)
-        self.api_wrapper.add_test_into_folder(
-            test_entity, self.api_wrapper.automation_folder_id
         )
 
 
@@ -320,28 +285,12 @@ class _DraftTestCreateWorker(_XrayBotWorker):
             "summary": f"[🤖Automation Draft] {test_entity.summary}",
             "assignee": {"name": self.context.jira.username},
             self.context.config.cf_id_test_definition: test_entity.unique_identifier,
-            **self.context.config.get_tests_cf_label_fields(),
+            **self.context.config.get_tests_custom_fields_payload(),
         }
 
         test_entity.key = self.context.jira.create_issue(fields)["key"]
         logger.info(f"Created xray test draft: {test_entity.key}")
         return test_entity
-
-
-class _NonMarkedTestUpdateWorker(_XrayBotWorker):
-    def run(self, test_entity: TestEntity):
-        logger.info(f"Start updating test: {test_entity.key}")
-        assert test_entity.key is not None, "Jira test key cannot be None"
-        fields = {
-            "summary": test_entity.summary,
-            "description": test_entity.description,
-        }
-        self.context.jira.update_issue_field(
-            key=test_entity.key,
-            fields=fields,
-        )
-        self.api_wrapper.remove_links(test_entity)
-        self.api_wrapper.link_test(test_entity)
 
 
 class _ExternalMarkedTestUpdateWorker(_XrayBotWorker):
@@ -363,6 +312,7 @@ class _InternalMarkedTestUpdateWorker(_XrayBotWorker):
         fields = {
             "summary": test_entity.summary,
             "description": test_entity.description,
+            "labels": test_entity.labels,
             self.context.config.cf_id_test_definition: test_entity.unique_identifier,
         }
         self.context.jira.update_issue_field(
@@ -392,12 +342,16 @@ class _AddTestsToExecutionWorker(_XrayBotWorker):
 
 
 class _UpdateTestResultsWorker(_XrayBotWorker):
-    def run(self, test_key: str, result: str, test_execution_key: str):
-        test_runs = self.context.xray.get_test_runs(test_key)
+    def run(self, test_result: TestResultEntity, test_execution_key: str):
+        test_runs = self.context.xray.get_test_runs(test_result.key)
         for test_run in test_runs:
             if test_run["testExecKey"] == test_execution_key:
-                logger.info(f"Start updating test run {test_key} result to {result}")
-                self.context.xray.update_test_run_status(test_run["id"], result)
+                logger.info(
+                    f"Start updating test run {test_result.key} result to {test_result.result.value}"
+                )
+                self.context.xray.update_test_run_status(
+                    test_run["id"], test_result.result.value
+                )
 
 
 class _CleanTestExecutionWorker(_XrayBotWorker):
@@ -422,24 +376,27 @@ class _CleanTestPlanWorker(_XrayBotWorker):
             self.context.xray.delete_test_from_test_plan(test_plan_key, test_key)
 
 
-class _JiraStatusBulkCheckWorker(_XrayBotWorker):
-    def run(self, jira_keys: List[str]):
-        logger.info(f"Bulk checking jira status: {jira_keys}...")
-        results = self.context.jira.bulk_issue(jira_keys, fields="status")
+class _BulkGetJiraDetailsWorker(_XrayBotWorker):
+    def run(self, test_keys: List[str]):
+        logger.info(f"Bulk checking test: {test_keys}...")
+        results = self.context.jira.bulk_issue(test_keys, fields="status,issuetype")
         results = [
-            (issue["key"], issue["fields"]["status"]["name"])
+            (
+                issue["key"],
+                issue["fields"]["status"]["name"],
+                issue["fields"]["issuetype"]["name"],
+            )
             for issue in results[0]["issues"]
         ]
-        assert len(results) == len(
-            jira_keys
-        ), f"Not enough jira status found: {results}"
+        non_existing_keys = set(test_keys) - set([_[0] for _ in results])
+        assert (
+            not non_existing_keys
+        ), f"Non existing jira key found: {non_existing_keys}"
         return results
 
 
 class WorkerType(Enum):
-    NonMarkedTestObsolete = _NonMarkedTestObsoleteWorker
-    NonMarkedTestCreate = _NonMarkedTestCreateWorker
-    NonMarkedTestUpdate = _NonMarkedTestUpdateWorker
+    ObsoleteTest = _ObsoleteTestWorker
     ExternalMarkedTestUpdate = _ExternalMarkedTestUpdateWorker
     InternalMarkedTestUpdate = _InternalMarkedTestUpdateWorker
     AddTestsToPlan = _AddTestsToPlanWorker
@@ -447,7 +404,7 @@ class WorkerType(Enum):
     UpdateTestResults = _UpdateTestResultsWorker
     CleanTestExecution = _CleanTestExecutionWorker
     CleanTestPlan = _CleanTestPlanWorker
-    JiraStatusBulkCheck = _JiraStatusBulkCheckWorker
+    BulkGetJiraDetails = _BulkGetJiraDetailsWorker
     DraftTestCreate = _DraftTestCreateWorker
 
 
@@ -457,19 +414,19 @@ class XrayBotWorkerMgr:
         self.api_wrapper = _XrayAPIWrapper(self.context)
 
     @staticmethod
-    def _worker_wrapper(worker_func, *iterables) -> WorkResult:
+    def _worker_wrapper(worker_func, *iterables) -> WorkerResult:
         try:
             ret = worker_func(*iterables)
-            return WorkResult(success=True, data=ret)
+            return WorkerResult(success=True, data=ret)
         except Exception as e:
             logger.info(
                 f"Worker [{worker_func.__qualname__.split('.')[0].lstrip('_')}] raised error: {e}"
             )
             converted = [str(_) for _ in iterables]
             err_msg = f"❌{e} -> 🐛{' | '.join(converted)}"
-            return WorkResult(success=False, data=err_msg)
+            return WorkerResult(success=False, data=err_msg)
 
-    def start_worker(self, worker_type: WorkerType, *iterables) -> List[WorkResult]:
+    def start_worker(self, worker_type: WorkerType, *iterables) -> List[WorkerResult]:
         worker: _XrayBotWorker = worker_type.value(self.api_wrapper)
         with ProcessPoolExecutor(self.context.config.worker_num) as executor:
             results = executor.map(

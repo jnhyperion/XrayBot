@@ -1,23 +1,23 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Any
+from typing import List, Any, Optional
 
 
 @dataclass
-class WorkResult:
+class WorkerResult:
     success: bool
     data: Any
 
 
 @dataclass
 class TestEntity:
-    # store in test custom field "Generic Test Definition"
-    # using as the unique identified for one certain test
-    unique_identifier: str
+    key: Optional[str]
     summary: str
-    description: str
-    req_key: str
-    key: Optional[str] = None
+    unique_identifier: str
+    description: str = ""
+    labels: List[str] = field(default_factory=list)
+    req_keys: List[str] = field(default_factory=list)
+    defect_keys: List[str] = field(default_factory=list)
 
 
 class XrayResultType(Enum):

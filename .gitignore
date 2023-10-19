@@ -8,5 +8,5 @@
 /**/build/*
 .coverage
 htmlcov/*
-tests/__out__/*
+tests/
 test.py
