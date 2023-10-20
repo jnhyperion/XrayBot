@@ -265,19 +265,12 @@ class XrayBot:
 
         return to_be_updated
 
-    def _clean_test_plan_and_execution(
-        self, test_execution_key: str, test_plan_key: str
-    ):
-        logger.info(
-            f"Start cleaning test execution {test_execution_key} and test plan {test_plan_key}"
-        )
+    def _clean_test_execution(self, test_execution_key: str):
+        logger.info(f"Start cleaning test execution {test_execution_key}")
         test_execution_tests = (
             self.worker_mgr.api_wrapper.get_tests_from_test_execution(
                 test_execution_key
             )
-        )
-        test_plan_tests = self.worker_mgr.api_wrapper.get_tests_from_test_plan(
-            test_plan_key
         )
 
         # delete obsolete tests from test execution
@@ -286,12 +279,26 @@ class XrayBot:
             [test_execution_key for _ in range(len(test_execution_tests))],
             test_execution_tests,
         )
+
+    def _clean_test_plan(self, test_plan_key: str):
+        logger.info(f"Start cleaning test plan {test_plan_key}")
+        test_plan_tests = self.worker_mgr.api_wrapper.get_tests_from_test_plan(
+            test_plan_key
+        )
         # delete obsolete tests from test plan
         self.worker_mgr.start_worker(
             WorkerType.CleanTestPlan,
             [test_plan_key for _ in range(len(test_plan_tests))],
             test_plan_tests,
         )
+
+    def _update_test_plan_execution_status(self, key):
+        for status in ["In Progress", "Executed"]:
+            try:
+                self.context.jira.set_issue_status(key, status)
+            except Exception as e:
+                # ignore errors from any status
+                logger.debug(f"Update test plan/execution status with error: {e}")
 
     def _assert_test_results_exist_in_xray_tests(
         self, test_results: List[TestResultEntity]
@@ -326,6 +333,9 @@ class XrayBot:
             [test_execution_key for _ in range(len(test_keys))],
             test_keys,
         )
+        self._update_test_plan_execution_status(test_execution_key)
+        if clean_obsolete:
+            self._clean_test_execution(test_execution_key)
 
         if test_plan_key:
             self.worker_mgr.start_worker(
@@ -344,22 +354,9 @@ class XrayBot:
                 test_execution_key,
                 fields={self.config.cf_id_test_plan: [test_plan_key]},
             )
-
-            # update test plan/execution status
-            for status in ["In Progress", "Executed"]:
-                try:
-                    self.context.jira.set_issue_status(test_execution_key, status)
-                except Exception as e:
-                    # ignore errors from any status
-                    logger.debug(f"Update test execution status with error: {e}")
-                try:
-                    self.context.jira.set_issue_status(test_plan_key, status)
-                except Exception as e:
-                    # ignore errors from any status
-                    logger.debug(f"Update test plan status with error: {e}")
-
-        if clean_obsolete:
-            self._clean_test_plan_and_execution(test_execution_key, test_plan_key)
+            self._update_test_plan_execution_status(test_plan_key)
+            if clean_obsolete:
+                self._clean_test_plan(test_plan_key)
 
         # update test execution result
         self.worker_mgr.start_worker(
