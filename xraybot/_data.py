@@ -19,6 +19,20 @@ class TestEntity:
     req_keys: List[str] = field(default_factory=list)
     defect_keys: List[str] = field(default_factory=list)
 
+    def __eq__(self, other):
+        if isinstance(other, TestEntity):
+            return (
+                self.key == other.key
+                and self.summary == other.summary
+                and self.unique_identifier == other.unique_identifier
+                and self.description == other.description
+                and set(self.labels) == set(other.labels)
+                and set(self.req_keys) == set(other.req_keys)
+                and set(self.defect_keys) == set(other.defect_keys)
+            )
+        else:
+            return False
+
 
 class XrayResultType(Enum):
     PASS = "PASS"
