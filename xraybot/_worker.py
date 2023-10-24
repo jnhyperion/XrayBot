@@ -2,7 +2,7 @@ from abc import abstractmethod
 from enum import Enum
 from typing import List
 from concurrent.futures.process import ProcessPoolExecutor
-from ._data import TestEntity, WorkerResult, TestResultEntity
+from ._data import TestEntity, WorkerResult, TestResultEntity, XrayResultType
 from ._utils import logger
 from ._context import XrayBotContext
 
@@ -348,6 +348,10 @@ class _UpdateTestResultsWorker(_XrayBotWorker):
             if test_run["testExecKey"] == test_execution_key:
                 logger.info(
                     f"Start updating test run {test_result.key} result to {test_result.result.value}"
+                )
+                # reset the test execution result firstly
+                self.context.xray.update_test_run_status(
+                    test_run["id"], XrayResultType.EXECUTING.value
                 )
                 self.context.xray.update_test_run_status(
                     test_run["id"], test_result.result.value

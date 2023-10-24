@@ -38,6 +38,7 @@ class XrayResultType(Enum):
     PASS = "PASS"
     FAIL = "FAIL"
     TODO = "TODO"
+    EXECUTING = "EXECUTING"
 
 
 @dataclass
