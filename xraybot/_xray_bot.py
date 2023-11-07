@@ -96,10 +96,14 @@ class XrayBot:
             links = issue["fields"]["issuelinks"]
             labels = issue["fields"]["labels"]
             req_keys = [
-                _["outwardIssue"]["key"] for _ in links if _["type"]["name"] == "Tests"
+                _["outwardIssue"]["key"]
+                for _ in links
+                if _["type"]["name"] == "Tests" and _.get("outwardIssue")
             ]
             defect_keys = [
-                _["outwardIssue"]["key"] for _ in links if _["type"]["name"] == "Defect"
+                _["outwardIssue"]["key"]
+                for _ in links
+                if _["type"]["name"] == "Defect" and _.get("outwardIssue")
             ]
             test = TestEntity(
                 key=issue["key"],
