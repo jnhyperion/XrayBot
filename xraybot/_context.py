@@ -72,13 +72,13 @@ class _XrayBotConfig:
 
     @property
     def cf_id_test_definition(self):
-        return self._get_custom_field_by_name(_CF_TEST_DEFINITION)
+        return self.get_custom_field_by_name(_CF_TEST_DEFINITION)
 
     @property
     def cf_id_test_plan(self):
-        return self._get_custom_field_by_name(_CF_TEST_PLAN)
+        return self.get_custom_field_by_name(_CF_TEST_PLAN)
 
-    def _get_custom_field_by_name(self, name: str):
+    def get_custom_field_by_name(self, name: str):
         if not self._cached_all_custom_fields:
             self._cached_all_custom_fields = self._jira.get_all_custom_fields()
         for f in self._cached_all_custom_fields:
@@ -88,7 +88,7 @@ class _XrayBotConfig:
     def get_tests_custom_fields_payload(self):
         fields = dict()
         for k, v in self._custom_fields.items():
-            custom_field = self._get_custom_field_by_name(k)
+            custom_field = self.get_custom_field_by_name(k)
             if isinstance(v, list) and v:
                 fields[custom_field] = [{"value": _} for _ in v]
             else:

@@ -1,6 +1,8 @@
 from abc import abstractmethod
 from enum import Enum
 from typing import List
+from retry import retry
+from atlassian.rest_client import HTTPError
 from concurrent.futures.process import ProcessPoolExecutor
 from ._data import TestEntity, WorkerResult, TestResultEntity, XrayResultType
 from ._utils import logger
@@ -250,6 +252,20 @@ class _XrayAPIWrapper:
                 page = page + 1
         return tests
 
+    def fuzzy_update(self, jira_key: str, payload: dict):
+        fields = {}
+        for k, v in payload.items():
+            custom_field = self.context.config.get_custom_field_by_name(k)
+            k = custom_field if custom_field is not None else k
+            fields[k] = v
+        try:
+            self.context.jira.update_issue_field(
+                key=jira_key,
+                fields=fields,
+            )
+        except HTTPError as e:
+            logger.error(f"Update failed with error: {e.response.text}")
+
 
 class _XrayBotWorker:
     def __init__(self, api_wrapper: _XrayAPIWrapper):
@@ -420,8 +436,13 @@ class XrayBotWorkerMgr:
     @staticmethod
     def _worker_wrapper(worker_func, *iterables) -> WorkerResult:
         try:
-            ret = worker_func(*iterables)
-            return WorkerResult(success=True, data=ret)
+
+            @retry(tries=3, delay=1, logger=logger.getLogger())
+            def run_with_retry():
+                ret = worker_func(*iterables)
+                return WorkerResult(success=True, data=ret)
+
+            return run_with_retry()
         except Exception as e:
             logger.info(
                 f"Worker [{worker_func.__qualname__.split('.')[0].lstrip('_')}] raised error: {e}"

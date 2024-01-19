@@ -1,5 +1,5 @@
 import copy
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Tuple
 from ._context import XrayBotContext
 from ._data import TestEntity, TestResultEntity
 from ._utils import logger
@@ -377,7 +377,7 @@ class XrayBot:
         clean_obsolete: bool = False,
         full_test_set: bool = False,
         ignore_missing: bool = False,
-    ):
+    ) -> Tuple[str, str]:
         test_plan_key = self.worker_mgr.api_wrapper.create_test_plan(test_plan_name)
         test_execution_key = self.worker_mgr.api_wrapper.create_test_execution(
             test_execution_name
@@ -390,6 +390,7 @@ class XrayBot:
             full_test_set=full_test_set,
             ignore_missing=ignore_missing,
         )
+        return test_plan_key, test_execution_key
 
     def sync_check(self, local_tests: List[TestEntity]):
         """
