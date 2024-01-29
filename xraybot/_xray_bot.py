@@ -439,9 +439,16 @@ class XrayBot:
         results = self.worker_mgr.start_worker(
             WorkerType.BulkGetJiraDetails, chunks(merged_link_keys)
         )
+        link_details_list = []
         for result in results:
             if not result.success:
                 errors.append(f"Query test links from jira failed: {result}")
+            else:
+                link_details_list.extend(result.data)
+            for issue_key, _, issue_type in link_details_list:
+                if issue_type == "Test":
+                    errors.append(f"Test link {issue_key} should not be a test.")
+
         if errors:
             err_msg = ""
             for idx, err in enumerate(errors):

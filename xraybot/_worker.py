@@ -397,9 +397,9 @@ class _CleanTestPlanWorker(_XrayBotWorker):
 
 
 class _BulkGetJiraDetailsWorker(_XrayBotWorker):
-    def run(self, test_keys: List[str]):
-        logger.info(f"Bulk checking test: {test_keys}...")
-        results = self.context.jira.bulk_issue(test_keys, fields="status,issuetype")
+    def run(self, jira_keys: List[str]):
+        logger.info(f"Bulk checking jira keys: {jira_keys}...")
+        results = self.context.jira.bulk_issue(jira_keys, fields="status,issuetype")
         results = [
             (
                 issue["key"],
@@ -408,7 +408,7 @@ class _BulkGetJiraDetailsWorker(_XrayBotWorker):
             )
             for issue in results[0]["issues"]
         ]
-        non_existing_keys = set(test_keys) - set([_[0] for _ in results])
+        non_existing_keys = set(jira_keys) - set([_[0] for _ in results])
         assert (
             not non_existing_keys
         ), f"Non existing jira key found: {non_existing_keys}"
