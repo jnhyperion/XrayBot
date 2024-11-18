@@ -2,6 +2,7 @@ from typing import List, Union, Dict
 from atlassian import Jira, Xray
 
 _CF_TEST_DEFINITION = "Generic Test Definition"
+_CF_TEST_REPO_PATH = "Test Repository Path"
 _CF_TEST_PLAN = "Test Plan"
 _CF_TEST_TYPE = "Test Type"
 _CF_TEST_TYPE_VAL_GENERIC = "Generic"
@@ -69,6 +70,10 @@ class _XrayBotConfig:
             field_name != _CF_TEST_DEFINITION
         ), f'Custom field "{field_name}" is not configurable.'
         self._custom_fields[field_name] = field_value
+
+    @property
+    def cf_id_test_repo_path(self):
+        return self.get_custom_field_by_name(_CF_TEST_REPO_PATH)
 
     @property
     def cf_id_test_definition(self):

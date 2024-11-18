@@ -1,21 +1,29 @@
 from abc import abstractmethod
 from enum import Enum
-from typing import List
+from typing import List, Optional
 from retry import retry
 from atlassian.rest_client import HTTPError
 from concurrent.futures.process import ProcessPoolExecutor
 from ._data import TestEntity, WorkerResult, TestResultEntity, XrayResultType
-from ._utils import logger
+from ._utils import logger, build_repo_hierarchy
 from ._context import XrayBotContext
 
 
 class _XrayAPIWrapper:
     def __init__(self, context: XrayBotContext):
         self.context = context
-        self.automation_folder_id_cache = None
-        self.automation_obsolete_folder_id_cache = None
+        self.automation_folder_id_cache: Optional[int] = None
+        self.automation_obsolete_folder_id_cache: Optional[int] = None
+        self.all_folder_cache = None
+        self.repo_hierarchy_cache = {}
 
-    def init_automation_repo_folder(self):
+    @staticmethod
+    def _get_repo_hierarchy_cache_key(repo_paths: List[str]):
+        return "/".join(repo_paths)
+
+    def prepare_repo_folder_hierarchy(self, test_entities: List[TestEntity]):
+        # prepare cache
+        self.all_folder_cache = self.get_all_folders()
         self.automation_folder_id_cache = self.create_repo_folder(
             self.context.config.automation_folder_name, -1
         )
@@ -23,6 +31,39 @@ class _XrayAPIWrapper:
             self.context.config.obsolete_automation_folder_name,
             self.automation_folder_id_cache,
         )
+
+        # add 2 special folders to cache
+        self.repo_hierarchy_cache[
+            self._get_repo_hierarchy_cache_key([""])
+        ] = self.automation_folder_id_cache
+        self.repo_hierarchy_cache[
+            self._get_repo_hierarchy_cache_key(
+                [self.context.config.obsolete_automation_folder_name]
+            )
+        ] = self.automation_obsolete_folder_id_cache
+
+        repo_hierarchy = build_repo_hierarchy([t.repo_path for t in test_entities])
+
+        def iter_repo_hierarchy(
+            parent_node_id: int, parent_paths: List[str], root: List[dict]
+        ):
+            for node in root:
+                folder_name = node["name"]
+                cur_node_id: int = self.create_repo_folder(folder_name, parent_node_id)
+                sub_folders = node["folders"]
+                cur_paths = parent_paths + [folder_name]
+                key = self._get_repo_hierarchy_cache_key(cur_paths)
+                self.repo_hierarchy_cache[key] = cur_node_id
+                if sub_folders:
+                    iter_repo_hierarchy(cur_node_id, cur_paths, sub_folders)
+
+        iter_repo_hierarchy(self.automation_folder_id_cache, [], repo_hierarchy)
+
+    @property
+    def all_folders(self):
+        if self.all_folder_cache is None:
+            self.all_folder_cache = self.get_all_folders()
+        return self.all_folder_cache
 
     @property
     def automation_folder_id(self):
@@ -40,6 +81,12 @@ class _XrayAPIWrapper:
                 self.automation_folder_id,
             )
         return self.automation_obsolete_folder_id_cache
+
+    def get_all_folders(self):
+        logger.info(f"Start get all test folders: {self.context.project_key}")
+        return self.context.xray.get(
+            f"rest/raven/1.0/api/testrepository/{self.context.project_key}/folders"
+        )
 
     def delete_test(self, test_entity: TestEntity):
         logger.info(f"Start deleting test: {test_entity.key}")
@@ -79,8 +126,11 @@ class _XrayAPIWrapper:
             except Exception as e:
                 raise AssertionError(f"Link defect {defect_key} with error: {e}") from e
 
-    def add_test_into_folder(self, test_entity: TestEntity, folder_id: int):
+    def move_test_folder(self, test_entity: TestEntity):
+        logger.info(f"Start moving test to repo folder: {test_entity.key}")
         try:
+            key = self._get_repo_hierarchy_cache_key(test_entity.repo_path)
+            folder_id = self.repo_hierarchy_cache[key]
             self.context.xray.put(
                 f"rest/raven/1.0/api/testrepository/"
                 f"{self.context.project_key}/folders/{folder_id}/tests",
@@ -88,7 +138,7 @@ class _XrayAPIWrapper:
             )
         except Exception as e:
             raise AssertionError(
-                f"Move test {test_entity.key} to repo folder with error: {e}"
+                f"Move test {test_entity.key} to folder with error: {e}"
             ) from e
 
     def remove_test_from_folder(self, test_entity: TestEntity, folder_id: int):
@@ -99,22 +149,20 @@ class _XrayAPIWrapper:
         )
 
     def create_repo_folder(self, folder_name: str, parent_id: int) -> int:
-        all_folders = self.context.xray.get(
-            f"rest/raven/1.0/api/testrepository/{self.context.project_key}/folders"
-        )
-
         def _iter_folders(folders):
             for _ in folders["folders"]:
                 if _["id"] == parent_id:
                     return _["folders"]
                 else:
-                    _iter_folders(_)
+                    result = _iter_folders(_)
+                    if result:
+                        return result
             return []
 
         if parent_id == -1:
-            sub_folders = all_folders["folders"]
+            sub_folders = self.all_folders["folders"]
         else:
-            sub_folders = _iter_folders(all_folders)
+            sub_folders = _iter_folders(self.all_folders)
 
         folder_id = -1
         for folder in sub_folders:
@@ -129,6 +177,8 @@ class _XrayAPIWrapper:
                 data={"name": folder_name},
             )
             folder_id = folder["id"]
+            # repo folder is updated, update cache too
+            self.all_folder_cache = self.get_all_folders()
         return folder_id
 
     def finalize_test_from_any_status(self, test_entity: TestEntity):
@@ -266,6 +316,41 @@ class _XrayAPIWrapper:
         except HTTPError as e:
             logger.error(f"Update failed with error: {e.response.text}")
 
+    def delete_empty_folder(self, folder_id: int):
+        try:
+            resp = self.context.xray.get(
+                f"rest/raven/1.0/api/testrepository/"
+                f"{self.context.project_key}/folders/{folder_id}/tests?allDescendants=true&page=1&limit=5"
+            )
+            if resp["total"] == 0:
+                self.context.xray.delete(
+                    f"rest/raven/1.0/api/testrepository/"
+                    f"{self.context.project_key}/folders/{folder_id}"
+                )
+                logger.info(f"Deleted empty folder: {folder_id}")
+        except HTTPError as e:
+            # parent folder could be deleted by other worker
+            # ignore such errors
+            logger.debug(f"Ignore errors: {e}")
+
+    def get_all_sub_folders_id(self) -> List[int]:
+        def _iter_folders(_folders: List[dict]):
+            _result = []
+            for _folder in _folders:
+                _result.append(_folder["id"])
+                sub_folders = _folder["folders"]
+                if sub_folders:
+                    _result = _result + _iter_folders(sub_folders)
+            return _result
+
+        for folder in self.all_folders["folders"]:
+            if folder["id"] == self.automation_folder_id:
+                result = _iter_folders(folder["folders"])
+                # ignore `Obsolete` folder
+                result.remove(self.automation_obsolete_folder_id)
+                return result
+        return []
+
 
 class _XrayBotWorker:
     def __init__(self, api_wrapper: _XrayAPIWrapper):
@@ -282,12 +367,9 @@ class _ObsoleteTestWorker(_XrayBotWorker):
         logger.info(f"Start obsoleting test: {test_entity.key}")
         self.context.jira.set_issue_status(test_entity.key, "Obsolete")
         self.api_wrapper.remove_links(test_entity)
-        self.api_wrapper.remove_test_from_folder(
-            test_entity, self.api_wrapper.automation_folder_id
-        )
-        self.api_wrapper.add_test_into_folder(
-            test_entity, self.api_wrapper.automation_obsolete_folder_id
-        )
+        # set current test repo path to `Obsolete` folder
+        test_entity.repo_path = [self.context.config.obsolete_automation_folder_name]
+        self.api_wrapper.move_test_folder(test_entity)
 
 
 class _DraftTestCreateWorker(_XrayBotWorker):
@@ -316,9 +398,7 @@ class _ExternalMarkedTestUpdateWorker(_XrayBotWorker):
         self.api_wrapper.finalize_test_from_any_status(test_entity)
         self.api_wrapper.remove_links(test_entity)
         self.api_wrapper.link_test(test_entity)
-        self.api_wrapper.add_test_into_folder(
-            test_entity, self.api_wrapper.automation_folder_id
-        )
+        self.api_wrapper.move_test_folder(test_entity)
 
 
 class _InternalMarkedTestUpdateWorker(_XrayBotWorker):
@@ -337,6 +417,7 @@ class _InternalMarkedTestUpdateWorker(_XrayBotWorker):
         )
         self.api_wrapper.remove_links(test_entity)
         self.api_wrapper.link_test(test_entity)
+        self.api_wrapper.move_test_folder(test_entity)
 
 
 class _AddTestsToPlanWorker(_XrayBotWorker):
@@ -415,6 +496,11 @@ class _BulkGetJiraDetailsWorker(_XrayBotWorker):
         return results
 
 
+class _CleanRepoFolderWorker(_XrayBotWorker):
+    def run(self, folder_id: int):
+        self.api_wrapper.delete_empty_folder(folder_id)
+
+
 class WorkerType(Enum):
     ObsoleteTest = _ObsoleteTestWorker
     ExternalMarkedTestUpdate = _ExternalMarkedTestUpdateWorker
@@ -426,6 +512,7 @@ class WorkerType(Enum):
     CleanTestPlan = _CleanTestPlanWorker
     BulkGetJiraDetails = _BulkGetJiraDetailsWorker
     DraftTestCreate = _DraftTestCreateWorker
+    CleanRepoFolder = _CleanRepoFolderWorker
 
 
 class XrayBotWorkerMgr:

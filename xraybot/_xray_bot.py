@@ -67,7 +67,7 @@ class XrayBot:
             f'"{self.context.jira_username}" '
             f'and status != "Obsolete" and issue in '
             f'testRepositoryFolderTests("{self.context.project_key}", '
-            f'"{self.config.automation_folder_name}")'
+            f'"{self.config.automation_folder_name}", "true")'
         )
         if filter_by_cf:
             for k, v in self.config.custom_fields.items():
@@ -87,6 +87,7 @@ class XrayBot:
                 "issuelinks",
                 "labels",
                 self.config.cf_id_test_definition,
+                self.config.cf_id_test_repo_path,
             ],
             limit=-1,
         )["issues"]
@@ -111,6 +112,9 @@ class XrayBot:
                 summary=issue["fields"]["summary"],
                 description=desc,
                 labels=labels,
+                repo_path=issue["fields"][self.config.cf_id_test_repo_path].split("/")[
+                    2:
+                ],
                 req_keys=req_keys,
                 defect_keys=defect_keys,
             )
@@ -204,7 +208,7 @@ class XrayBot:
         self._check_tests_uniqueness(
             local_tests, "Duplicated key/unique_identifier found in local tests"
         )
-        self.worker_mgr.api_wrapper.init_automation_repo_folder()
+        self.worker_mgr.api_wrapper.prepare_repo_folder_hierarchy(local_tests)
         xray_tests = self.get_xray_tests()
         (
             to_be_obsolete_xray_tests,
@@ -247,6 +251,11 @@ class XrayBot:
             for idx, err in enumerate(errors):
                 err_msg = f"{err_msg}\n({idx + 1}) {err}"
             raise AssertionError(f"Sync failed with the following errors:\n{err_msg}.")
+        logger.info("Start cleaning empty repo folders")
+        self.worker_mgr.start_worker(
+            WorkerType.CleanRepoFolder,
+            self.worker_mgr.api_wrapper.get_all_sub_folders_id(),
+        )
 
     @staticmethod
     def _get_internal_marked_tests_diff(
