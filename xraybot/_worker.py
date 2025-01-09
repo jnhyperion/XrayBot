@@ -3,7 +3,7 @@ from enum import Enum
 from typing import List, Optional
 from retry import retry
 from atlassian.rest_client import HTTPError
-from concurrent.futures.process import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from ._data import TestEntity, WorkerResult, TestResultEntity, XrayResultType
 from ._utils import logger, build_repo_hierarchy
 from ._context import XrayBotContext
@@ -540,7 +540,7 @@ class XrayBotWorkerMgr:
 
     def start_worker(self, worker_type: WorkerType, *iterables) -> List[WorkerResult]:
         worker: _XrayBotWorker = worker_type.value(self.api_wrapper)
-        with ProcessPoolExecutor(self.context.config.worker_num) as executor:
+        with ThreadPoolExecutor(self.context.config.worker_num) as executor:
             results = executor.map(
                 self._worker_wrapper,
                 [worker.run for _ in range(len(iterables[0]))],
