@@ -104,7 +104,7 @@ class _XrayAPIWrapper:
                 f"Start linking test {test_entity.key} to requirement: {req_key}"
             )
             link_param = {
-                "type": {"name": "Tests"},
+                "type": {"name": "Test"},
                 "inwardIssue": {"key": test_entity.key},
                 "outwardIssue": {"key": req_key},
             }
