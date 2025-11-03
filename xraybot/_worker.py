@@ -95,7 +95,7 @@ class _XrayAPIWrapper:
     def remove_links(self, test_entity: TestEntity):
         issue = self.context.jira.get_issue(test_entity.key)
         for link in issue["fields"]["issuelinks"]:
-            if link["type"]["name"] in ("Tests", "Defect"):
+            if link["type"]["name"] in ("Test", "Defect"):
                 self.context.jira.remove_issue_link(link["id"])
 
     def link_test(self, test_entity: TestEntity):

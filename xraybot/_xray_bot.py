@@ -99,7 +99,7 @@ class XrayBot:
             req_keys = [
                 _["outwardIssue"]["key"]
                 for _ in links
-                if _["type"]["name"] == "Tests" and _.get("outwardIssue")
+                if _["type"]["name"] == "Test" and _.get("outwardIssue")
             ]
             defect_keys = [
                 _["outwardIssue"]["key"]
