@@ -12,85 +12,91 @@ from ._context import XrayBotContext
 class _XrayAPIWrapper:
     def __init__(self, context: XrayBotContext):
         self.context = context
-        self.automation_folder_id_cache: Optional[int] = None
-        self.automation_obsolete_folder_id_cache: Optional[int] = None
-        self.all_folder_cache = None
-        self.repo_hierarchy_cache = {}
-
-    @staticmethod
-    def _get_repo_hierarchy_cache_key(repo_paths: List[str]):
-        return "/".join(repo_paths)
-
+        self._all_folder_cache = None
+        
     def prepare_repo_folder_hierarchy(self, test_entities: List[TestEntity]):
-        # prepare cache
-        self.all_folder_cache = self.get_all_folders()
-        self.automation_folder_id_cache = self.create_repo_folder(
-            self.context.config.automation_folder_name, -1
-        )
-        self.automation_obsolete_folder_id_cache = self.create_repo_folder(
-            self.context.config.obsolete_automation_folder_name,
-            self.automation_folder_id_cache,
-        )
-
-        # add 2 special folders to cache
-        self.repo_hierarchy_cache[
-            self._get_repo_hierarchy_cache_key([""])
-        ] = self.automation_folder_id_cache
-        self.repo_hierarchy_cache[
-            self._get_repo_hierarchy_cache_key(
-                [self.context.config.obsolete_automation_folder_name]
-            )
-        ] = self.automation_obsolete_folder_id_cache
-
+        self.init_automation_folder()
         repo_hierarchy = build_repo_hierarchy([t.repo_path for t in test_entities])
 
         def iter_repo_hierarchy(
-            parent_node_id: int, parent_paths: List[str], root: List[dict]
+            parent_paths: List[str], root: List[dict]
         ):
             for node in root:
                 folder_name = node["name"]
-                cur_node_id: int = self.create_repo_folder(folder_name, parent_node_id)
-                sub_folders = node["folders"]
                 cur_paths = parent_paths + [folder_name]
-                key = self._get_repo_hierarchy_cache_key(cur_paths)
-                self.repo_hierarchy_cache[key] = cur_node_id
+                self.create_repo_folder("/".join(cur_paths))
+                sub_folders = node["folders"]
                 if sub_folders:
-                    iter_repo_hierarchy(cur_node_id, cur_paths, sub_folders)
+                    iter_repo_hierarchy(cur_paths, sub_folders)
 
-        iter_repo_hierarchy(self.automation_folder_id_cache, [], repo_hierarchy)
+        iter_repo_hierarchy([], repo_hierarchy)
 
     @property
     def all_folders(self):
-        if self.all_folder_cache is None:
-            self.all_folder_cache = self.get_all_folders()
-        return self.all_folder_cache
+        if self._all_folder_cache is None:
+            self._all_folder_cache = self.get_all_folders()
+        return self._all_folder_cache
 
-    @property
-    def automation_folder_id(self):
-        if self.automation_folder_id_cache is None:
-            self.automation_folder_id_cache = self.create_repo_folder(
-                self.context.config.automation_folder_name, -1
+    def init_automation_folder(self):
+        self.create_repo_folder(
+                self.context.config.automation_folder_name
             )
-        return self.automation_folder_id_cache
+        self.create_repo_folder(
+                f"{self.context.config.automation_folder_name}/{self.context.config.obsolete_automation_folder_name}"
+            )
 
-    @property
-    def automation_obsolete_folder_id(self):
-        if self.automation_obsolete_folder_id_cache is None:
-            self.automation_obsolete_folder_id_cache = self.create_repo_folder(
-                self.context.config.obsolete_automation_folder_name,
-                self.automation_folder_id,
-            )
-        return self.automation_obsolete_folder_id_cache
+    def get_xray_tests_by_repo_folder(self, repo_folder: str):
+        payload = f"""
+        {{
+            getTests(limit: 1, testType: {{name: "Automated"}}, folder: {{path: "/{repo_folder}", includeDescendants: true}}, projectId: "{self.context.project_id}") {{
+                total
+            }}
+        }}
+        """
+        total = self.context.execute_xray_graphql(payload)["getTests"]["total"]
+        pages = total // 100 + 1
+        # max 25 resolvers, each query contains 3 resolvers, so it will have 8 batch queries
+        max_resovler_batch = 8
+        all_results = []
+        def _worker(batch_start):
+            batch_end = min(batch_start + max_resovler_batch, pages)
+            batch_payload = ""
+            for page in range(batch_start, batch_end):
+                logger.info(f"Start getting tests from page {page} to {batch_end}")
+                each_page_payload = f"""
+                query{page}: getTests(jql: "project = '{self.context.project_key}' and type = 'Test' and status != 'Obsolete' and reporter = 'svcqauser01@telenav.com'", limit: 100, testType: {{name: "Automated"}}, folder: {{path: "/{repo_folder}", includeDescendants: true}}, projectId: "{self.context.project_id}", start: {page * 100}) {{
+                    results {{
+                        issueId
+                        unstructured
+                        folder {{
+                            path
+                        }}
+                        jira(fields: ["key"])
+                    }}
+                }}
+                """
+                batch_payload = batch_payload + each_page_payload
+            batch_payload = f"{{{batch_payload}}}"
+            batch_results = self.context.execute_xray_graphql(batch_payload)
+            return list(batch_results.values())
+        
+        with ThreadPoolExecutor() as executor:
+            all_results.extend(executor.map(_worker, range(0, pages, max_resovler_batch)))
+        return sum([_["results"] for _ in sum([_ for _ in all_results], [])], [])
 
     def get_all_folders(self):
-        logger.info(f"Start get all test folders: {self.context.project_key}")
-        return self.context.xray.get(
-            f"rest/raven/1.0/api/testrepository/{self.context.project_key}/folders"
-        )
-
-    def delete_test(self, test_entity: TestEntity):
-        logger.info(f"Start deleting test: {test_entity.key}")
-        self.context.jira.delete_issue(test_entity.key)
+        logger.info(f"Start getting all test folders for project: {self.context.project_key}")
+        query = f"""
+        {{
+            getFolder(projectId: "{self.context.project_id}", path: "/") {{
+                name
+                path
+                testsCount
+                folders
+            }}
+        }}
+        """
+        return self.context.execute_xray_graphql(query)["getFolder"]
 
     def remove_links(self, test_entity: TestEntity):
         issue = self.context.jira.get_issue(test_entity.key)
@@ -148,38 +154,37 @@ class _XrayAPIWrapper:
             data={"remove": [test_entity.key]},
         )
 
-    def create_repo_folder(self, folder_name: str, parent_id: int) -> int:
-        def _iter_folders(folders):
-            for _ in folders["folders"]:
-                if _["id"] == parent_id:
-                    return _["folders"]
-                else:
-                    result = _iter_folders(_)
-                    if result:
-                        return result
-            return []
+    def create_repo_folder(self, folder_path: str):
+        logger.info(f"Start creating repo folder: {folder_path}")
+        def _is_folder_path_existing(folders: List[dict]) -> bool:
+            for folder in folders:
+                if folder["path"] == folder_path:
+                    return True
+                if folder.get("folders"):
+                    if _is_folder_path_existing(folder["folders"]):
+                        return True
+            return False
 
-        if parent_id == -1:
-            sub_folders = self.all_folders["folders"]
+        if not _is_folder_path_existing(self.all_folders["folders"]):
+            payload = f"""
+                    mutation {{
+                        createFolder(
+                            projectId: "{self.context.project_id}",
+                            path: "{folder_path}"
+                        ) {{
+                            folder {{
+                                name
+                                path
+                                testsCount
+                            }}
+                            warnings
+                        }}
+                    }}
+                    """
+            self.context.execute_xray_graphql(payload)["createFolder"]
         else:
-            sub_folders = _iter_folders(self.all_folders)
+            print(f"Using existing folder: {folder_path}")
 
-        folder_id = -1
-        for folder in sub_folders:
-            if folder_name == folder["name"]:
-                logger.info(f"Using existing test repo folder: {folder_name}")
-                folder_id = folder["id"]
-                break
-        if folder_id == -1:
-            logger.info(f"Create test repo folder: {folder_name}")
-            folder = self.context.xray.post(
-                f"rest/raven/1.0/api/testrepository/{self.context.project_key}/folders/{parent_id}",
-                data={"name": folder_name},
-            )
-            folder_id = folder["id"]
-            # repo folder is updated, update cache too
-            self.all_folder_cache = self.get_all_folders()
-        return folder_id
 
     def finalize_test_from_any_status(self, test_entity: TestEntity):
         logger.info(f"Start finalizing test: {test_entity.key}")

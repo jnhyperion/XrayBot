@@ -1,14 +1,7 @@
-from typing import List, Union, Dict
-from atlassian import Jira, Xray
-
-_CF_TEST_DEFINITION = "Generic Test Definition"
-_CF_TEST_REPO_PATH = "Test Repository Path"
-_CF_TEST_PLAN = "Test Plan"
-_CF_TEST_TYPE = "Test Type"
-_CF_TEST_TYPE_VAL_GENERIC = "Generic"
-_CF_TEST_TYPE_VAL_MANUAL = "Manual"
-_CF_TEST_TYPE_VAL_CUCUMBER = "Cucumber"
-
+from typing import List, Union, Dict, Optional
+from atlassian import Jira
+import requests
+import json
 
 class _XrayBotConfig:
     def __init__(self, jira):
@@ -19,7 +12,6 @@ class _XrayBotConfig:
         self._worker_num: int = 30
         self._automation_folder_name = "Automation Test"
         self._obsolete_automation_folder_name = "Obsolete"
-        self.configure_custom_field(_CF_TEST_TYPE, _CF_TEST_TYPE_VAL_GENERIC)
 
     def configure_query_page_limit(self, limit: int):
         self._query_page_limit = limit
@@ -61,27 +53,7 @@ class _XrayBotConfig:
         :param field_value: custom field value of the test ticket
         e.g: field_value="value", field_value=["value1", "value2"]
         """
-        if field_name == _CF_TEST_TYPE:
-            assert field_value not in (
-                _CF_TEST_TYPE_VAL_MANUAL,
-                _CF_TEST_TYPE_VAL_CUCUMBER,
-            ), f'Custom field value "{field_value}" is not supported in "{field_name}".'
-        assert (
-            field_name != _CF_TEST_DEFINITION
-        ), f'Custom field "{field_name}" is not configurable.'
         self._custom_fields[field_name] = field_value
-
-    @property
-    def cf_id_test_repo_path(self):
-        return self.get_custom_field_by_name(_CF_TEST_REPO_PATH)
-
-    @property
-    def cf_id_test_definition(self):
-        return self.get_custom_field_by_name(_CF_TEST_DEFINITION)
-
-    @property
-    def cf_id_test_plan(self):
-        return self.get_custom_field_by_name(_CF_TEST_PLAN)
 
     def get_custom_field_by_name(self, name: str):
         if not self._cached_all_custom_fields:
@@ -109,15 +81,30 @@ class XrayBotContext:
         jira_pwd: str,
         project_key: str,
         timeout: int,
+        xray_api_token: str,
     ):
         self._jira: Jira = Jira(
             url=jira_url, username=jira_username, password=jira_pwd, timeout=timeout
         )
-        self._xray: Xray = Xray(
-            url=jira_url, username=jira_username, password=jira_pwd, timeout=timeout
-        )
+        self._xray_session = requests.Session()
+        self._xray_api_token = xray_api_token
+        self._xray_session.headers.update({
+            "Authorization": f"Bearer {self._xray_api_token}",
+            "Content-Type": "application/json"
+        })
         self._project_key: str = project_key
+        self._project_id: Optional[int] = None
         self._config = _XrayBotConfig(self._jira)
+    
+    def execute_xray_graphql(self, payload):
+        """Execute a GraphQL query or mutation"""
+        url = "https://xray.cloud.getxray.app/api/v2/graphql"
+        response = self._xray_session.post(url, json={"query": payload})
+        response.raise_for_status()
+        result = response.json()
+        if "errors" in result:
+            raise AssertionError(f"GraphQL error: {json.dumps(result['errors'], indent=2)}")
+        return result["data"]
 
     @property
     def jira_username(self) -> Jira:
@@ -128,13 +115,15 @@ class XrayBotContext:
         return self._jira
 
     @property
-    def xray(self) -> Xray:
-        return self._xray
-
-    @property
     def project_key(self) -> str:
         return self._project_key
 
     @property
     def config(self) -> _XrayBotConfig:
         return self._config
+
+    @property
+    def project_id(self) -> int:
+        if self._project_id is None:
+            self._project_id = self._jira.get_project(self._project_key)["id"]
+        return self._project_id

@@ -6,12 +6,6 @@ from ._utils import logger
 from ._worker import WorkerType, XrayBotWorkerMgr
 
 
-_CF_TEST_DEFINITION = "Generic Test Definition"
-_CF_TEST_TYPE = "Test Type"
-_CF_TEST_TYPE_VAL_GENERIC = "Generic"
-_CF_TEST_TYPE_VAL_MANUAL = "Manual"
-_CF_TEST_TYPE_VAL_CUCUMBER = "Cucumber"
-
 
 class XrayBot:
     _JIRA_API_TIMEOUT = 75
@@ -21,7 +15,7 @@ class XrayBot:
     _AUTOMATION_OBSOLETE_TESTS_FOLDER_NAME = "Obsolete"
 
     def __init__(
-        self, jira_url: str, jira_username: str, jira_pwd: str, project_key: str
+        self, jira_url: str, jira_username: str, jira_pwd: str, project_key: str, xray_api_token: str
     ):
         """
         :param jira_url: str
@@ -35,6 +29,7 @@ class XrayBot:
             jira_pwd,
             project_key,
             timeout=self._JIRA_API_TIMEOUT,
+            xray_api_token=xray_api_token,
         )
         self.config = self.context.config
         self.config.configure_query_page_limit(self._QUERY_PAGE_LIMIT)
@@ -59,8 +54,7 @@ class XrayBot:
         logger.info(
             f"Start querying all xray tests for project: {self.context.project_key}"
         )
-        folder_id = self.worker_mgr.api_wrapper.automation_folder_id
-        assert folder_id is not None
+        self.worker_mgr.api_wrapper.init_automation_folder()
         # jql requires automation folder, need to make sure the folder exists
         jql = (
             f'project = "{self.context.project_key}" and type = "Test" and reporter = '
@@ -85,9 +79,7 @@ class XrayBot:
                 "summary",
                 "description",
                 "issuelinks",
-                "labels",
-                self.config.cf_id_test_definition,
-                self.config.cf_id_test_repo_path,
+                "labels"
             ],
             limit=-1,
         )["issues"]
