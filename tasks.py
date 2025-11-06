@@ -1,8 +1,8 @@
 import os
 import sys
 import shutil
-from pathlib import Path
 from invoke import task
+from glob import glob
 
 
 def _get_ctx_abs_path(ctx, *path) -> str:
@@ -15,31 +15,23 @@ def init(ctx):
 
 
 @task
-def clean(ctx):
-    shutil.rmtree(
-        _get_ctx_abs_path(ctx, "htmlcov"),
-        ignore_errors=True,
-    )
-    shutil.rmtree(
-        _get_ctx_abs_path(ctx, ".pytest_cache"),
-        ignore_errors=True,
-    )
-    shutil.rmtree(
-        _get_ctx_abs_path(ctx, ".tox"),
-        ignore_errors=True,
-    )
-    Path(_get_ctx_abs_path(ctx, ".coverage")).unlink(missing_ok=True)
-    shutil.rmtree(_get_ctx_abs_path(ctx, "build"), ignore_errors=True)
-    shutil.rmtree(_get_ctx_abs_path(ctx, "dist"), ignore_errors=True)
-    shutil.rmtree(
-        _get_ctx_abs_path(ctx, "xray_bot.egg-info"),
-        ignore_errors=True,
-    )
+def clean(_):
+    shutil.rmtree("dist", ignore_errors=True)
+    shutil.rmtree("build", ignore_errors=True)
+    shutil.rmtree(".pytest_cache", ignore_errors=True)
+    shutil.rmtree(os.path.join("tests", ".pytest_cache"), ignore_errors=True)
+    shutil.rmtree(os.path.join("tests", "__coverage__"), ignore_errors=True)
+    egg_info_files = glob(os.path.join("src", "*.egg-info"))
+    for f in egg_info_files:
+        shutil.rmtree(f, ignore_errors=True)
 
 
 @task(clean)
 def build(ctx):
-    ctx.run(f"{sys.executable} setup.py bdist_wheel", hide="out")
+    ctx.run("pip install --upgrade build")
+    ctx.run(f"{sys.executable} -m build")
+    assert glob(os.path.join("dist", "*.whl"))
+    assert glob(os.path.join("dist", "*.tar.gz"))
 
 
 @task
@@ -49,4 +41,6 @@ def pre_commit(ctx):
 
 @task(build)
 def publish(ctx):
-    ctx.run(f"{sys.executable} -m twine upload dist/*")
+    ctx.run("pip install --upgrade twine")
+    cmd = f"{sys.executable} -m twine upload dist/*"
+    ctx.run(cmd)
