@@ -5,6 +5,7 @@
 .idea
 .mypy_cache
 .venv
+.ruff_cache
 build
 dist
 .pytest_cache/*
