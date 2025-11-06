@@ -19,6 +19,7 @@ class TestEntity:
     labels: List[str] = field(default_factory=list)
     req_keys: List[str] = field(default_factory=list)
     defect_keys: List[str] = field(default_factory=list)
+    issue_id: Optional[str] = None
 
     def __eq__(self, other):
         if isinstance(other, TestEntity):
@@ -37,10 +38,12 @@ class TestEntity:
 
 
 class XrayResultType(Enum):
-    PASS = "PASS"
-    FAIL = "FAIL"
+    PASSED = "PASSED"
+    FAILED = "FAILED"
     TODO = "TODO"
     EXECUTING = "EXECUTING"
+    BLOCKED = "BLOCKED"
+    ABORTED = "ABORTED"
 
 
 @dataclass

@@ -1,0 +1,37 @@
+[build-system]
+requires = [
+    "setuptools>=64",
+    "setuptools_scm>=8",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xray-bot"
+dynamic = ["version"]
+description = "Synchronize atlassian xray test case tickets with your test code and upload the test results"
+readme = "README.md"
+requires-python = ">=3.8.1"
+keywords = ["atlassian", "xray", "automation"]
+authors = [
+    { name = "Johnny.H", email = "jnhyperion@gmail.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "atlassian-python-api==4.0.5",
+    "retry"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "invoke",
+    "pytest",
+    "pytest-cov"
+]
+
+[tool.setuptools_scm]
+version_file = "src/xraybot/__version__.py"

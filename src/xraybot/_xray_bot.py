@@ -6,7 +6,6 @@ from ._utils import logger
 from ._worker import WorkerType, XrayBotWorkerMgr
 
 
-
 class XrayBot:
     _JIRA_API_TIMEOUT = 75
     _QUERY_PAGE_LIMIT = 100
@@ -15,7 +14,13 @@ class XrayBot:
     _AUTOMATION_OBSOLETE_TESTS_FOLDER_NAME = "Obsolete"
 
     def __init__(
-        self, jira_url: str, jira_username: str, jira_pwd: str, project_key: str, xray_api_token: str
+        self,
+        jira_url: str,
+        jira_username: str,
+        jira_pwd: str,
+        jira_account_id: str,
+        project_key: str,
+        xray_api_token: str,
     ):
         """
         :param jira_url: str
@@ -27,12 +32,12 @@ class XrayBot:
             jira_url,
             jira_username,
             jira_pwd,
+            jira_account_id,
             project_key,
             timeout=self._JIRA_API_TIMEOUT,
             xray_api_token=xray_api_token,
         )
         self.config = self.context.config
-        self.config.configure_query_page_limit(self._QUERY_PAGE_LIMIT)
         self.config.configure_worker_num(self._MULTI_PROCESS_WORKER_NUM)
         self.config.configure_automation_folder_name(self._AUTOMATION_TESTS_FOLDER_NAME)
         self.config.configure_obsolete_automation_folder_name(
@@ -55,39 +60,27 @@ class XrayBot:
             f"Start querying all xray tests for project: {self.context.project_key}"
         )
         self.worker_mgr.api_wrapper.init_automation_folder()
-        # jql requires automation folder, need to make sure the folder exists
-        jql = (
-            f'project = "{self.context.project_key}" and type = "Test" and reporter = '
-            f'"{self.context.jira_username}" '
-            f'and status != "Obsolete" and issue in '
-            f'testRepositoryFolderTests("{self.context.project_key}", '
-            f'"{self.config.automation_folder_name}", "true")'
-        )
+
+        customized_field_jql = ""
         if filter_by_cf:
             for k, v in self.config.custom_fields.items():
                 if isinstance(v, list) and v:
                     converted = ",".join([f'"{_}"' for _ in v])
-                    jql = f'{jql} and "{k}" in ({converted})'
+                    customized_field_jql = (
+                        f'{customized_field_jql} and "{k}" in ({converted})'
+                    )
                 else:
-                    jql = f'{jql} and "{k}" = "{v}"'
+                    customized_field_jql = f'{customized_field_jql} and "{k}" = "{v}"'
 
-        logger.info(f"Querying jql: {jql}")
+        issues = self.worker_mgr.api_wrapper.get_xray_tests_by_repo_folder(
+            self.config.automation_folder_name, customized_field_jql
+        )
         tests = []
-        issues = self.context.jira.jql(
-            jql,
-            fields=[
-                "summary",
-                "description",
-                "issuelinks",
-                "labels"
-            ],
-            limit=-1,
-        )["issues"]
         for issue in issues:
-            desc = issue["fields"]["description"]
+            desc = issue["jira"]["description"]
             desc = desc if desc is not None else ""
-            links = issue["fields"]["issuelinks"]
-            labels = issue["fields"]["labels"]
+            links = issue["jira"]["issuelinks"]
+            labels = issue["jira"]["labels"]
             req_keys = [
                 _["outwardIssue"]["key"]
                 for _ in links
@@ -99,16 +92,15 @@ class XrayBot:
                 if _["type"]["name"] == "Defect" and _.get("outwardIssue")
             ]
             test = TestEntity(
-                key=issue["key"],
-                unique_identifier=issue["fields"][self.config.cf_id_test_definition],
-                summary=issue["fields"]["summary"],
+                key=issue["jira"]["key"],
+                unique_identifier=issue["unstructured"],
+                summary=issue["jira"]["summary"],
                 description=desc,
                 labels=labels,
-                repo_path=issue["fields"][self.config.cf_id_test_repo_path].split("/")[
-                    2:
-                ],
+                repo_path=issue["folder"]["path"].split("/")[2:],
                 req_keys=req_keys,
                 defect_keys=defect_keys,
+                issue_id=issue["issueId"],
             )
             tests.append(test)
         self._check_tests_uniqueness(
@@ -121,7 +113,7 @@ class XrayBot:
     def _check_tests_uniqueness(tests: List[TestEntity], error_msg):
         unique_identifiers = [t.unique_identifier for t in tests]
         duplicated_tests = [
-            f"({idx+1}) {t}"
+            f"({idx + 1}) {t}"
             for idx, t in enumerate(tests)
             if unique_identifiers.count(t.unique_identifier) > 1
         ]
@@ -147,6 +139,10 @@ class XrayBot:
         internal_marked_local_tests = list()
         for local_test in local_tests:
             if local_test.key in xray_tests_keys:
+                matched_xray_test = [t for t in xray_tests if t.key == local_test.key][
+                    0
+                ]
+                local_test.issue_id = matched_xray_test.issue_id
                 internal_marked_local_tests.append(local_test)
             else:
                 external_marked_local_tests.append(local_test)
@@ -246,7 +242,7 @@ class XrayBot:
         logger.info("Start cleaning empty repo folders")
         self.worker_mgr.start_worker(
             WorkerType.CleanRepoFolder,
-            self.worker_mgr.api_wrapper.get_all_sub_folders_id(),
+            self.worker_mgr.api_wrapper.get_all_empty_folders(),
         )
 
     @staticmethod
@@ -255,9 +251,9 @@ class XrayBot:
         internal_marked_local_tests: List[TestEntity],
     ):
         to_be_updated = list()
-        assert len(filtered_xray_tests) == len(
-            internal_marked_local_tests
-        ), "Internal marked test num is incorrect."
+        assert len(filtered_xray_tests) == len(internal_marked_local_tests), (
+            "Internal marked test num is incorrect."
+        )
 
         def get_matched_xray_test(key):
             matched_tests = [t for t in filtered_xray_tests if t.key == key]
@@ -281,20 +277,20 @@ class XrayBot:
         # delete obsolete tests from test execution
         self.worker_mgr.start_worker(
             WorkerType.CleanTestExecution,
-            [test_execution_key for _ in range(len(test_execution_tests))],
-            test_execution_tests,
+            [test_execution_key],
+            [test_execution_tests],
         )
 
     def _clean_test_plan(self, test_plan_key: str):
-        logger.info(f"Start cleaning test plan {test_plan_key}")
+        logger.info(f"Start cleaning test plan: {test_plan_key}")
         test_plan_tests = self.worker_mgr.api_wrapper.get_tests_from_test_plan(
             test_plan_key
         )
         # delete obsolete tests from test plan
         self.worker_mgr.start_worker(
             WorkerType.CleanTestPlan,
-            [test_plan_key for _ in range(len(test_plan_tests))],
-            test_plan_tests,
+            [test_plan_key],
+            [test_plan_tests],
         )
 
     def _update_test_plan_execution_status(self, key):
@@ -305,16 +301,6 @@ class XrayBot:
                 # ignore errors from any status
                 logger.debug(f"Update test plan/execution status with error: {e}")
 
-    def _assert_test_results_exist_in_xray_tests(
-        self, test_results: List[TestResultEntity]
-    ):
-        xray_tests = self.get_xray_tests()
-        xray_tests_keys = [t.key for t in xray_tests]
-        for result in test_results:
-            assert (
-                result.key in xray_tests_keys
-            ), f"Unrecognized test {result.key} from test results"
-
     def upload_test_results_by_key(
         self,
         test_execution_key: str,
@@ -324,19 +310,30 @@ class XrayBot:
         full_test_set: bool = False,
         ignore_missing: bool = False,
     ):
+        xray_tests = self.get_xray_tests()
+        xray_tests_keys = [t.key for t in xray_tests]
         if not ignore_missing:
-            self._assert_test_results_exist_in_xray_tests(test_results)
+            for result in test_results:
+                assert result.key in xray_tests_keys, (
+                    f"Unrecognized test {result.key} from test results"
+                )
 
         if full_test_set:
-            tests = self.get_xray_tests()
-            test_keys = [t.key for t in tests]
+            test_key_and_ids = [(t.key, t.issue_id) for t in xray_tests]
         else:
-            test_keys = [t.key for t in test_results]
+            test_key_and_ids = []
+            for result in test_results:
+                matched_xray_test = [t for t in xray_tests if t.key == result.key]
+                if matched_xray_test:
+                    issue_id = matched_xray_test[0].issue_id
+                else:
+                    issue_id = None
+                test_key_and_ids.append((result.key, issue_id))
 
         self.worker_mgr.start_worker(
             WorkerType.AddTestsToExecution,
-            [test_execution_key for _ in range(len(test_keys))],
-            test_keys,
+            [test_execution_key],
+            [test_key_and_ids],
         )
         self._update_test_plan_execution_status(test_execution_key)
         if clean_obsolete:
@@ -345,29 +342,23 @@ class XrayBot:
         if test_plan_key:
             self.worker_mgr.start_worker(
                 WorkerType.AddTestsToPlan,
-                [test_plan_key for _ in range(len(test_keys))],
-                test_keys,
-            )
-            logger.info(
-                f"Start adding test execution {test_execution_key} to test plan {test_plan_key}"
-            )
-            # self.context.xray.update_test_plan_test_executions(
-            #     test_plan_key, add=[test_execution_key]
-            # )
-            # workaround for xray testplan API performance issue
-            self.context.jira.update_issue_field(
-                test_execution_key,
-                fields={self.config.cf_id_test_plan: [test_plan_key]},
+                [test_plan_key],
+                [test_key_and_ids],
             )
             self._update_test_plan_execution_status(test_plan_key)
             if clean_obsolete:
                 self._clean_test_plan(test_plan_key)
 
+            logger.info(
+                f"Start adding test execution {test_execution_key} to test plan {test_plan_key}"
+            )
+            self.worker_mgr.api_wrapper.add_test_execution_to_test_plan(
+                test_plan_key, test_execution_key
+            )
+
         # update test execution result
         self.worker_mgr.start_worker(
-            WorkerType.UpdateTestResults,
-            test_results,
-            [test_execution_key for _ in range(len(test_results))],
+            WorkerType.UpdateTestResults, [test_execution_key], [test_results]
         )
 
     def upload_test_results(
@@ -403,9 +394,9 @@ class XrayBot:
         test_keys = [_.key for _ in local_tests]
         req_keys_list = [_.req_keys for _ in local_tests]
         defect_keys_list = [_.defect_keys for _ in local_tests]
-        assert (
-            None not in test_keys
-        ), "Some of the tests are not marked with test key, run sync prepare firstly."
+        assert None not in test_keys, (
+            "Some of the tests are not marked with test key, run sync prepare firstly."
+        )
 
         self._check_tests_uniqueness(
             local_tests, "Duplicated key/unique_identifier found in local tests"

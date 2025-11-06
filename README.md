@@ -42,7 +42,7 @@ xray_bot.upload_automation_results("test_plan", "test_execution", test_results)
 Development
 -------
 ``` sh
-$ pip install -r requirements-dev.txt
+$ pip install -e ".[dev]"
 # test
 $ invoke test
 # lint
