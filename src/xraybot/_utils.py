@@ -68,8 +68,11 @@ def dict_to_graphql_param(d: dict) -> str:
             return str(value)
         elif isinstance(value, str):
             # Escape quotes in strings
-            escaped = value.replace('"', '\\"')
-            return f'"{escaped}"'
+            if len(value.splitlines()) > 1:
+                return f'"""{value}"""'
+            else:
+                escaped = value.replace('"', '\\"')
+                return f'"{escaped}"'
         elif isinstance(value, dict):
             return dict_to_graphql_param(value)
         elif isinstance(value, (list, tuple)):
