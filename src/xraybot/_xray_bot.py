@@ -65,12 +65,12 @@ class XrayBot:
         if filter_by_cf:
             for k, v in self.config.custom_fields.items():
                 if isinstance(v, list) and v:
-                    converted = ",".join([f'"{_}"' for _ in v])
+                    converted = ",".join([f"'{_}'" for _ in v])
                     customized_field_jql = (
-                        f'{customized_field_jql} and "{k}" in ({converted})'
+                        f"{customized_field_jql} and '{k}' in ({converted})"
                     )
                 else:
-                    customized_field_jql = f'{customized_field_jql} and "{k}" = "{v}"'
+                    customized_field_jql = f"{customized_field_jql} and '{k}' = '{v}'"
 
         issues = self.worker_mgr.api_wrapper.get_xray_tests_by_repo_folder(
             self.config.automation_folder_name, customized_field_jql
