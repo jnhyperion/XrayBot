@@ -39,6 +39,8 @@ class _XrayAPIWrapper:
         self.create_repo_folder(
             f"{self.context.config.automation_folder_name}/{self.context.config.obsolete_automation_folder_name}"
         )
+        # ensure all_folders is refreshed
+        del self.all_folders
 
     def get_xray_tests_by_repo_folder(
         self, repo_folder: str, customized_field_jql: str = ""
@@ -137,6 +139,7 @@ class _XrayAPIWrapper:
             except Exception as e:
                 raise AssertionError(f"Link defect {defect_key} with error: {e}") from e
 
+    @retry(tries=10, delay=3, logger=logger)
     def move_test_folder(self, test_entity: TestEntity):
         assert test_entity.issue_id is not None, "Test entity issue id cannot be None"
         folder_path = "/".join(
@@ -228,7 +231,20 @@ class _XrayAPIWrapper:
             key=marked_test.key,
             fields=fields,
         )
+        self.update_test_type(marked_test)
         self.update_unstructured_test_definition(marked_test)
+
+    def update_test_type(self, test_entity: TestEntity):
+        logger.info(f"Start updating test type: {test_entity.key}")
+        assert test_entity.issue_id is not None, "Test entity issue id cannot be None"
+        payload = f"""
+        mutation {{
+            updateTestType(issueId: "{test_entity.issue_id}", testType: {{ name: "Automated" }}) {{
+                issueId
+            }}
+        }}
+        """
+        self.context.execute_xray_graphql(payload)
 
     def update_unstructured_test_definition(self, test_entity: TestEntity):
         logger.info(f"Start updating unstructured test definition: {test_entity.key}")
@@ -470,6 +486,27 @@ class _XrayAPIWrapper:
         return sum(
             [_["tests"]["results"] for _ in sum([_ for _ in all_results], [])], []
         )
+
+    def add_test_environments_to_test_execution(
+        self, test_execution_key: str, test_environments: List[str]
+    ):
+        logger.info(
+            f"Start adding test environments: {test_environments} to test execution: {test_execution_key}"
+        )
+        test_execution_issue_id = self.get_issue_id_by_key(test_execution_key)
+        test_environments_param = (
+            ",".join([f'"{_}"' for _ in test_environments])
+            if test_environments
+            else "[]"
+        )
+        payload = f"""
+        mutation {{
+            addTestEnvironmentsToTestExecution(issueId: "{test_execution_issue_id}", testEnvironments: {test_environments_param}) {{
+                warning
+            }}
+        }}
+        """
+        self.context.execute_xray_graphql(payload)
 
     def fuzzy_update(self, jira_key: str, payload: dict):
         fields = {}

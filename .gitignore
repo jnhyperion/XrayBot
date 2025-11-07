@@ -5,6 +5,7 @@
 .idea
 .mypy_cache
 .venv
+.vscode
 .ruff_cache
 build
 dist
