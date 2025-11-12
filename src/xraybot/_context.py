@@ -10,7 +10,7 @@ class _XrayBotConfig:
     def __init__(self, jira: Jira):
         self._jira: Jira = jira
         self._custom_fields: Dict[str, Union[str, List[str]]] = {}
-        self._worker_num: int = 30
+        self._worker_num: int = 4
         self._automation_folder_name = "Automation Test"
         self._obsolete_automation_folder_name = "Obsolete"
 

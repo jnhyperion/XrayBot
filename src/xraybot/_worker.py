@@ -634,7 +634,7 @@ class _DraftTestCreateWorker(_XrayBotWorker):
             "reporter": {"accountId": self.context.jira_account_id},
             **self.context.config.get_tests_custom_fields_payload(),
         }
-        fields_param = dict_to_graphql_param(fields)
+        fields_param = dict_to_graphql_param(fields, multilines_keys=["description"])
 
         payload = f"""
         mutation {{

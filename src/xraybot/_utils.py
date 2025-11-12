@@ -42,7 +42,7 @@ def build_repo_hierarchy(paths: List[List[str]]) -> List[dict]:
     return root
 
 
-def dict_to_graphql_param(d: dict) -> str:
+def dict_to_graphql_param(d: dict, multilines_keys: List[str] = []) -> str:
     """
     Convert a Python dict to GraphQL parameter string format.
 
@@ -58,7 +58,7 @@ def dict_to_graphql_param(d: dict) -> str:
     """
     assert isinstance(d, dict), f"Expected dict, got {type(d).__name__}"
 
-    def format_value(value):
+    def format_value(key, value):
         """Format a single value for GraphQL."""
         if value is None:
             return "null"
@@ -68,8 +68,8 @@ def dict_to_graphql_param(d: dict) -> str:
             return str(value)
         elif isinstance(value, str):
             # Escape quotes in strings
-            if len(value.splitlines()) > 1:
-                return f'"""{value}"""'
+            if len(value.splitlines()) > 1 or key in multilines_keys:
+                return f'"""\n{value}\n"""'
             else:
                 escaped = value.replace('"', '\\"')
                 return f'"{escaped}"'
@@ -77,7 +77,7 @@ def dict_to_graphql_param(d: dict) -> str:
             return dict_to_graphql_param(value)
         elif isinstance(value, (list, tuple)):
             # Format list as GraphQL array
-            items = ", ".join(format_value(item) for item in value)
+            items = ", ".join(format_value(None, item) for item in value)
             return f"[{items}]"
         else:
             # Fallback: convert to string and quote it
@@ -86,7 +86,7 @@ def dict_to_graphql_param(d: dict) -> str:
     # Format key-value pairs
     pairs = []
     for key, value in d.items():
-        formatted_value = format_value(value)
+        formatted_value = format_value(key, value)
         pairs.append(f"{key}: {formatted_value}")
 
     # Join pairs with comma and space, wrap in braces
